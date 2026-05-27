@@ -26,6 +26,7 @@ import {
   getDoc,
   getDocs,
   updateDoc, 
+  setDoc,
   arrayUnion,
   deleteDoc
 } from 'firebase/firestore';
@@ -63,6 +64,7 @@ function SlackDashboard({ user, logout }) {
   const [channelSettingsTarget, setChannelSettingsTarget] = useState(null);
   const [activeThreadMessageId, setActiveThreadMessageId] = useState(null);
   const [unreadNotifications, setUnreadNotifications] = useState([]);
+  const [activeTypers, setActiveTypers] = useState([]);
 
   // Preference States
   const [theme, setTheme] = useState(() => localStorage.getItem('slack_theme') || 'light');
@@ -425,6 +427,125 @@ function SlackDashboard({ user, logout }) {
   }, [user]);
 
   // ========================================================
+  // 5.7. REAL-TIME OBSERVER: TYPING STATUS (FIRESTORE MODE)
+  // ========================================================
+  useEffect(() => {
+    if (!isConfigured || !user || !activeWorkspaceId || !activeDestinationId) {
+      setActiveTypers([]);
+      return;
+    }
+
+    const q = collection(db, 'typing_status');
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const typers = [];
+      const now = Date.now();
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        
+        const isChannelMatch = !data.isDestinationDm && data.destinationId === activeDestinationId;
+        const isDmMatch = data.isDestinationDm && data.userId === activeDestinationId && data.destinationId === user.uid;
+
+        if (
+          data.workspaceId === activeWorkspaceId &&
+          (isChannelMatch || isDmMatch) &&
+          data.userId !== user.uid &&
+          data.isTyping === true
+        ) {
+          const updatedTime = data.updatedAt ? (typeof data.updatedAt.toMillis === 'function' ? data.updatedAt.toMillis() : new Date(data.updatedAt).getTime()) : now;
+          const isFresh = (now - updatedTime) < 10000;
+          if (isFresh) {
+            typers.push(data);
+          }
+        }
+      });
+      setActiveTypers(typers);
+    }, (err) => {
+      console.warn('Typing observer error:', err);
+    });
+
+    return () => unsubscribe();
+  }, [activeWorkspaceId, activeDestinationId, user]);
+
+  // ========================================================
+  // 5.8. LOCAL STORAGE SYNC: TYPING STATUS (EMULATOR MODE)
+  // ========================================================
+  useEffect(() => {
+    if (isConfigured || !user || !activeWorkspaceId || !activeDestinationId) {
+      setActiveTypers([]);
+      return;
+    }
+
+    const loadTyping = () => {
+      const localData = JSON.parse(localStorage.getItem('slack_typing_status') || '{}');
+      const typers = [];
+      const now = Date.now();
+      Object.values(localData).forEach((data) => {
+        const isChannelMatch = !data.isDestinationDm && data.destinationId === activeDestinationId;
+        const isDmMatch = data.isDestinationDm && data.userId === activeDestinationId && data.destinationId === user.uid;
+
+        if (
+          data.workspaceId === activeWorkspaceId &&
+          (isChannelMatch || isDmMatch) &&
+          data.userId !== user.uid &&
+          data.isTyping === true &&
+          now - data.updatedAt < 10000
+        ) {
+          typers.push(data);
+        }
+      });
+      setActiveTypers(typers);
+    };
+
+    loadTyping();
+
+    const handleStorageChange = (e) => {
+      if (e.key === 'slack_typing_status') {
+        loadTyping();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('slack_local_typing_update', loadTyping);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('slack_local_typing_update', loadTyping);
+    };
+  }, [activeWorkspaceId, activeDestinationId, user]);
+
+  // ========================================================
+  // 5.9. TYPING STATUS CLEANUP ON UNLOAD / LOGOUT / UNMOUNT
+  // ========================================================
+  useEffect(() => {
+    const cleanup = () => {
+      if (user) {
+        if (isConfigured) {
+          try {
+            const docRef = doc(db, 'typing_status', user.uid);
+            deleteDoc(docRef).catch(() => {});
+          } catch (e) {}
+        } else {
+          try {
+            const localData = JSON.parse(localStorage.getItem('slack_typing_status') || '{}');
+            if (localData[user.uid]) {
+              delete localData[user.uid];
+              localStorage.setItem('slack_typing_status', JSON.stringify(localData));
+              window.dispatchEvent(new Event('storage'));
+              window.dispatchEvent(new Event('slack_local_typing_update'));
+            }
+          } catch (e) {}
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', cleanup);
+    return () => {
+      window.removeEventListener('beforeunload', cleanup);
+      cleanup(); // runs immediately when user logs out or switches accounts!
+    };
+  }, [user]);
+
+  // ========================================================
   // 6. DETECTOR: SYNC ACTIVE CHANNELS (avoids orphan views)
   // ========================================================
   useEffect(() => {
@@ -562,6 +683,76 @@ function SlackDashboard({ user, logout }) {
       }
     }
   }, [activeWorkspaceId, activeDestinationId, unreadNotifications]);
+
+  // Start typing status helper
+  const handleTypingStart = async () => {
+    if (!user || !activeWorkspaceId || !activeDestinationId) return;
+    console.log('✍️ handleTypingStart triggered in App.jsx for user:', user.name);
+
+    if (isConfigured) {
+      try {
+        const docRef = doc(db, 'typing_status', user.uid);
+        await setDoc(docRef, {
+          workspaceId: activeWorkspaceId,
+          destinationId: activeDestinationId,
+          isDestinationDm: isDestinationDm,
+          userId: user.uid,
+          userName: user.name,
+          isTyping: true,
+          updatedAt: serverTimestamp()
+        });
+      } catch (err) {
+        console.warn('Error starting typing in Firestore:', err);
+      }
+    } else {
+      try {
+        const localKey = 'slack_typing_status';
+        const localData = JSON.parse(localStorage.getItem(localKey) || '{}');
+        localData[user.uid] = {
+          workspaceId: activeWorkspaceId,
+          destinationId: activeDestinationId,
+          isDestinationDm: isDestinationDm,
+          userId: user.uid,
+          userName: user.name,
+          isTyping: true,
+          updatedAt: Date.now()
+        };
+        localStorage.setItem(localKey, JSON.stringify(localData));
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('slack_local_typing_update'));
+      } catch (err) {
+        console.warn('Error starting typing locally:', err);
+      }
+    }
+  };
+
+  // Stop typing status helper
+  const handleTypingStop = async () => {
+    if (!user) return;
+    console.log('🛑 handleTypingStop triggered in App.jsx for user:', user.name);
+
+    if (isConfigured) {
+      try {
+        const docRef = doc(db, 'typing_status', user.uid);
+        await deleteDoc(docRef);
+      } catch (err) {
+        console.warn('Error stopping typing in Firestore:', err);
+      }
+    } else {
+      try {
+        const localKey = 'slack_typing_status';
+        const localData = JSON.parse(localStorage.getItem(localKey) || '{}');
+        if (localData[user.uid]) {
+          delete localData[user.uid];
+          localStorage.setItem(localKey, JSON.stringify(localData));
+          window.dispatchEvent(new Event('storage'));
+          window.dispatchEvent(new Event('slack_local_typing_update'));
+        }
+      } catch (err) {
+        console.warn('Error stopping typing locally:', err);
+      }
+    }
+  };
 
   // Send Message write action
   const handleSendMessage = async (content, fileAttachment = null, parentMessageId = null) => {
@@ -1616,6 +1807,9 @@ function SlackDashboard({ user, logout }) {
               }
             });
           }}
+          activeTypers={activeTypers}
+          onTypingStart={handleTypingStart}
+          onTypingStop={handleTypingStop}
         />
 
         {/* Right side panels: either ThreadPanel or MembersPanel */}

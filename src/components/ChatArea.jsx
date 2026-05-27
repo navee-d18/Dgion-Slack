@@ -221,7 +221,10 @@ export default function ChatArea({
   onJoinWorkspaceClick,
   unreadNotifications = [],
   onJumpTo,
-  onMarkAllAsRead
+  onMarkAllAsRead,
+  activeTypers = [],
+  onTypingStart,
+  onTypingStop
 }) {
   const { user, loading } = useAuth();
   const isCreator = activeWorkspace?.createdBy === user?.uid;
@@ -255,6 +258,10 @@ export default function ChatArea({
   const [linkLabel, setLinkLabel] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [attachment, setAttachment] = useState(null);
+
+  // Typing status refs & state
+  const typingTimeoutRef = useRef(null);
+  const [isTypingState, setIsTypingState] = useState(false);
 
   // Message deletion confirmation states
   const [deleteTargetMessageId, setDeleteTargetMessageId] = useState(null);
@@ -492,6 +499,40 @@ export default function ChatArea({
     reader.readAsDataURL(file);
   };
 
+  // Cleanup typing status when ChatArea unmounts or switches
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      if (onTypingStop) onTypingStop();
+    };
+  }, [activeDestinationId, activeWorkspace?.id]);
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setInputText(val);
+
+    if (val.trim().length > 0) {
+      if (!isTypingState) {
+        setIsTypingState(true);
+        if (onTypingStart) onTypingStart();
+      }
+      
+      // Reset typing timeout
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        setIsTypingState(false);
+        if (onTypingStop) onTypingStop();
+      }, 2000); // stops typing after 2 seconds of inactivity
+    } else {
+      // If text becomes completely empty, stop typing instantly (no wait)
+      if (isTypingState) {
+        setIsTypingState(false);
+        if (onTypingStop) onTypingStop();
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      }
+    }
+  };
+
   const handleSend = () => {
     if (!inputText.trim() && !attachment) return;
     onSendMessage(inputText, attachment);
@@ -499,6 +540,11 @@ export default function ChatArea({
     setAttachment(null);
     setShowLinkModal(false);
     setShowEmojiPicker(false);
+
+    // Clear typing timeout and stop typing instantly!
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    setIsTypingState(false);
+    if (onTypingStop) onTypingStop();
   };
 
   const handleKeyDown = (e) => {
@@ -1216,6 +1262,27 @@ export default function ChatArea({
 
       {/* 3. COMPOSER PANEL - FLOATING ROUNDED BOX WITH EXACT TOOLBAR STYLE */}
       <footer className="p-6 pt-1 select-none shrink-0 bg-white">
+        {/* Typing status bar */}
+        <div className="h-5 flex items-center mb-1 px-1">
+          {activeTypers && activeTypers.length > 0 && (
+            <div className="text-[12px] text-slate-500 font-medium flex items-center gap-1.5 animate-in fade-in duration-200">
+              <span className="truncate max-w-[240px] font-bold text-slate-600">
+                {activeTypers.length === 1
+                  ? `${activeTypers[0].userName}`
+                  : activeTypers.length === 2
+                    ? `${activeTypers[0].userName} and ${activeTypers[1].userName}`
+                    : `${activeTypers[0].userName}, ${activeTypers[1].userName} and ${activeTypers.length - 2} others`
+                }
+              </span>
+              <span>{activeTypers.length === 1 ? 'is typing' : 'are typing'}</span>
+              <span className="flex items-center gap-0.5 ml-0.5 mt-0.5 select-none">
+                <span className="w-1 h-1 rounded-full bg-slate-500 animate-bounce [animation-delay:-0.3s]" />
+                <span className="w-1 h-1 rounded-full bg-slate-500 animate-bounce [animation-delay:-0.15s]" />
+                <span className="w-1 h-1 rounded-full bg-slate-500 animate-bounce" />
+              </span>
+            </div>
+          )}
+        </div>
         <div className="border border-[#E8E8E8] focus-within:ring-1 focus-within:ring-[#1164A3] focus-within:border-[#1164A3] rounded-xl flex flex-col overflow-hidden bg-white shadow-sm transition-all duration-100 bg-white">
           
           {/* Removable staged attachment pill */}
@@ -1240,7 +1307,7 @@ export default function ChatArea({
           <textarea
             ref={textareaRef}
             value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             placeholder={`Message ${isDestinationDm ? destinationName : `#${destinationName}`}`}
             className="w-full resize-none border-none focus:outline-none p-3.5 pb-2 text-[15px] text-[#1D1C1D] placeholder-slate-400 min-h-[44px] max-h-[180px] font-normal font-sans bg-transparent"

@@ -70,5 +70,11 @@ service cloud.firestore {
       allow create: if isSignedIn() && isMemberOfWorkspace(request.resource.data.workspaceId);
       allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
+
+    // 6. Typing Status Collection Rules
+    match /typing_status/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId;
+    }
   }
 }
