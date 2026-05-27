@@ -3,7 +3,7 @@ import {
   Hash, Lock, Search, Users, Menu, Send, Bold, Italic, 
   Strikethrough, Code, Link, Paperclip, Smile, HelpCircle, 
   MoreHorizontal, MessageSquare, Bookmark, SmilePlus, Loader2, Settings, Briefcase,
-  X, FileText, Trash2, Edit
+  X, FileText, Trash2, Edit, Bell, BellOff
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -218,13 +218,21 @@ export default function ChatArea({
   onAddChannelClick,
   onAddWorkspaceClick,
   onChannelSettingsClick,
-  onJoinWorkspaceClick
+  onJoinWorkspaceClick,
+  unreadNotifications = [],
+  onJumpTo,
+  onMarkAllAsRead
 }) {
   const { user, loading } = useAuth();
   const isCreator = activeWorkspace?.createdBy === user?.uid;
   const [inputText, setInputText] = useState('');
+  const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const messagesEndRef = useRef(null);
   const containerRef = useRef(null);
+
+  const activeWorkspaceUnreads = (unreadNotifications || []).filter(
+    n => n.workspaceId === activeWorkspace?.id
+  );
   const messageRefs = useRef({});
 
   const activeChannel = !isDestinationDm 
@@ -758,6 +766,123 @@ export default function ChatArea({
             <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             <span className="truncate opacity-75">Search messages...</span>
           </button>
+
+          {/* Notifications Bell Button */}
+          <div className="relative">
+            <button
+              onClick={() => setShowNotificationsDropdown(!showNotificationsDropdown)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-slate-800 shrink-0 transition-colors border border-transparent active:scale-[0.97] transition-all font-sans relative ${
+                showNotificationsDropdown ? 'bg-slate-100 text-[#1164A3] hover:text-[#1164A3] border-[#E8E8E8] shadow-sm font-extrabold' : 'font-bold'
+              }`}
+              title="Notifications"
+              aria-label="Toggle notifications dropdown"
+            >
+              <Bell className="w-4 h-4 shrink-0" />
+              {activeWorkspaceUnreads.length > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white font-extrabold text-[9px] flex items-center justify-center border border-white animate-pulse">
+                  {activeWorkspaceUnreads.length}
+                </span>
+              )}
+            </button>
+
+            {/* Notifications Dropdown Panel */}
+            {showNotificationsDropdown && (
+              <>
+                <div 
+                  className="fixed inset-0 z-[60]" 
+                  onClick={() => setShowNotificationsDropdown(false)}
+                />
+                <div className="absolute right-0 mt-1.5 w-80 sm:w-[340px] bg-white border border-[#E8E8E8] rounded-xl shadow-slack-popover flex flex-col z-[80] animate-in fade-in slide-in-from-top-2 duration-100 overflow-hidden font-sans select-none max-h-[380px]">
+                  
+                  {/* Header */}
+                  <div className="px-4 py-3 bg-slate-50 border-b border-slate-150 flex items-center justify-between shrink-0">
+                    <span className="text-xs font-black text-[#1D1C1D] flex items-center gap-1.5">
+                      <span>Notifications</span>
+                      {activeWorkspaceUnreads.length > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 text-[9px] font-black leading-none">
+                          {activeWorkspaceUnreads.length} unread
+                        </span>
+                      )}
+                    </span>
+                    {activeWorkspaceUnreads.length > 0 && (
+                      <button
+                        onClick={() => {
+                          onMarkAllAsRead();
+                          setShowNotificationsDropdown(false);
+                        }}
+                        className="text-[10px] font-black text-[#1164A3] hover:underline cursor-pointer"
+                      >
+                        Mark all read
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Feed container */}
+                  <div className="flex-1 overflow-y-auto custom-scrollbar divide-y divide-slate-100 min-h-0">
+                    {activeWorkspaceUnreads.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center p-8 text-center text-slate-400 font-semibold select-none h-44">
+                        <span className="text-2xl mb-1 select-none">🔔</span>
+                        <p className="text-xs font-bold text-slate-600">All caught up!</p>
+                        <p className="text-[10.5px] text-slate-400 font-medium mt-0.5">No unread notifications in this workspace.</p>
+                      </div>
+                    ) : (
+                      activeWorkspaceUnreads.map(notif => {
+                        const notifDate = notif.createdAt ? (typeof notif.createdAt.toDate === 'function' ? notif.createdAt.toDate() : new Date(notif.createdAt)) : new Date();
+                        const timeString = notifDate.toLocaleTimeString('en-US', {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                          hour12: true
+                        });
+
+                        return (
+                          <button
+                            key={notif.id}
+                            onClick={() => {
+                              onJumpTo(
+                                notif.destinationId,
+                                notif.isDestinationDm,
+                                notif.messageId || null,
+                                notif.workspaceId,
+                                notif.parentMessageId || null
+                              );
+                              setShowNotificationsDropdown(false);
+                            }}
+                            className="w-full p-3 hover:bg-slate-50 flex items-start gap-2.5 text-left transition-colors cursor-pointer group/notif-row"
+                          >
+                            {/* Avatar */}
+                            <div className={`w-7.5 h-7.5 rounded-full text-white font-extrabold flex items-center justify-center text-[10px] shrink-0 shadow-sm ${getAvatarColorClass(notif.senderName || 'Unknown')}`}>
+                              {getInitials(notif.senderName || 'US')}
+                            </div>
+
+                            {/* Details */}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-baseline justify-between select-none">
+                                <span className="text-xs font-bold text-[#1D1C1D] group-hover/notif-row:text-[#1164A3] transition-colors truncate pr-1">
+                                  {notif.senderName}
+                                </span>
+                                <span className="text-[9px] text-slate-400 font-semibold shrink-0">
+                                  {timeString}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-500 font-bold mt-0.5 flex items-center gap-1 select-none">
+                                <span>in</span>
+                                <span className="text-[#1164A3] truncate">
+                                  {notif.type === 'dm' ? 'Direct Message' : notif.type === 'invite' ? 'Invites' : `#${notif.destinationName}`}
+                                </span>
+                              </p>
+                              <p className="text-[11.5px] text-slate-700 font-normal truncate mt-1 leading-normal">
+                                {notif.content}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
 
           <button
             onClick={onToggleRightPanel}

@@ -14,7 +14,8 @@ export default function ChannelNav({
   onSettingsClick,
   onPreferencesClick,
   onHelpClick,
-  compactMode
+  compactMode,
+  unreadNotifications = []
 }) {
   const [channelsExpanded, setChannelsExpanded] = useState(true);
   const [dmsExpanded, setDmsExpanded] = useState(true);
@@ -198,6 +199,9 @@ export default function ChannelNav({
             <div className="space-y-[1.5px]">
               {(activeWorkspace.channels || []).map((ch) => {
                 const isSelected = !isDestinationDm && ch.id === activeDestinationId;
+                const channelUnreadCount = (unreadNotifications || []).filter(
+                  n => n.workspaceId === activeWorkspace.id && n.destinationId === ch.id && !n.isRead
+                ).length;
                 return (
                   <button
                     key={ch.id}
@@ -207,15 +211,22 @@ export default function ChannelNav({
                     } ${
                       isSelected 
                         ? 'bg-[#1164A3] text-white font-semibold shadow-sm' 
-                        : 'hover:bg-white/5 text-white/70 hover:text-white'
+                        : channelUnreadCount > 0
+                          ? 'text-white font-bold hover:bg-white/5'
+                          : 'hover:bg-white/5 text-white/70 hover:text-white'
                     }`}
                   >
                     {ch.isPrivate ? (
-                      <Lock className="w-3.5 h-3.5 shrink-0 opacity-80" />
+                      <Lock className={`w-3.5 h-3.5 shrink-0 ${channelUnreadCount > 0 ? 'opacity-100 text-white font-extrabold' : 'opacity-80'}`} />
                     ) : (
-                      <Hash className="w-3.5 h-3.5 shrink-0 opacity-80" />
+                      <Hash className={`w-3.5 h-3.5 shrink-0 ${channelUnreadCount > 0 ? 'opacity-100 text-white font-extrabold' : 'opacity-80'}`} />
                     )}
-                    <span className="truncate">{ch.name}</span>
+                    <span className="truncate flex-1">{ch.name}</span>
+                    {channelUnreadCount > 0 && (
+                      <span className="ml-auto min-w-[18px] h-[18px] px-1.5 rounded-full bg-[#1164A3] text-white font-black text-[9.5px] flex items-center justify-center shadow-sm select-none animate-in scale-in duration-100">
+                        {channelUnreadCount}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -256,6 +267,9 @@ export default function ChannelNav({
             <div className="space-y-[1.5px]">
               {(activeWorkspace.dms || []).map((dm) => {
                 const isSelected = isDestinationDm && dm.id === activeDestinationId;
+                const dmUnreadCount = (unreadNotifications || []).filter(
+                  n => n.workspaceId === activeWorkspace.id && n.destinationId === dm.id && !n.isRead
+                ).length;
                 return (
                   <button
                     key={dm.id}
@@ -265,7 +279,9 @@ export default function ChannelNav({
                     } ${
                       isSelected 
                         ? 'bg-[#1164A3] text-white font-semibold shadow-sm' 
-                        : 'hover:bg-white/5 text-white/70 hover:text-white'
+                        : dmUnreadCount > 0
+                          ? 'text-white font-bold hover:bg-white/5'
+                          : 'hover:bg-white/5 text-white/70 hover:text-white'
                     }`}
                   >
                     <span 
@@ -277,7 +293,12 @@ export default function ChannelNav({
                             : 'bg-white/20'
                       }`}
                     />
-                    <span className="truncate">{dm.name}</span>
+                    <span className="truncate flex-1">{dm.name}</span>
+                    {dmUnreadCount > 0 && (
+                      <span className="ml-auto min-w-[18px] h-[18px] px-1.5 rounded-full bg-[#2BAC76] text-white font-black text-[9.5px] flex items-center justify-center shadow-sm select-none animate-in scale-in duration-100">
+                        {dmUnreadCount}
+                      </span>
+                    )}
                   </button>
                 );
               })}

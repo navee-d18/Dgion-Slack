@@ -62,6 +62,7 @@ function SlackDashboard({ user, logout }) {
   const [syncError, setSyncError] = useState(null);
   const [channelSettingsTarget, setChannelSettingsTarget] = useState(null);
   const [activeThreadMessageId, setActiveThreadMessageId] = useState(null);
+  const [unreadNotifications, setUnreadNotifications] = useState([]);
 
   // Preference States
   const [theme, setTheme] = useState(() => localStorage.getItem('slack_theme') || 'light');
@@ -367,6 +368,63 @@ function SlackDashboard({ user, logout }) {
   }, [activeWorkspaceId, activeDestinationId, user, isDestinationDm, notifications]);
 
   // ========================================================
+  // 5.5. REAL-TIME OBSERVER: NOTIFICATIONS (FIRESTORE MODE)
+  // ========================================================
+  useEffect(() => {
+    if (!isConfigured || !user) return;
+
+    const q = query(
+      collection(db, 'notifications'),
+      where('userId', '==', user.uid)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedNotifications = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.isRead === false) {
+          fetchedNotifications.push({ id: doc.id, ...data });
+        }
+      });
+      console.log('🔔 Loaded unread notifications for user:', user.uid, fetchedNotifications);
+      setUnreadNotifications(fetchedNotifications);
+    }, (err) => {
+      console.warn('Notifications observer error:', err);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // ========================================================
+  // 5.6. LOCAL STORAGE SYNC: NOTIFICATIONS (EMULATOR MODE)
+  // ========================================================
+  useEffect(() => {
+    if (isConfigured || !user) return;
+
+    const loadNotifications = () => {
+      const localData = JSON.parse(localStorage.getItem(`slack_notifications_user_${user.uid}`) || '[]');
+      setUnreadNotifications(localData.filter(n => !n.isRead));
+    };
+
+    loadNotifications();
+
+    const handleStorageChange = (e) => {
+      if (e.key === `slack_notifications_user_${user.uid}`) {
+        loadNotifications();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    const handleLocalUpdate = () => loadNotifications();
+    window.addEventListener('slack_local_notifications_update', handleLocalUpdate);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('slack_local_notifications_update', handleLocalUpdate);
+    };
+  }, [user]);
+
+  // ========================================================
   // 6. DETECTOR: SYNC ACTIVE CHANNELS (avoids orphan views)
   // ========================================================
   useEffect(() => {
@@ -458,6 +516,53 @@ function SlackDashboard({ user, logout }) {
     setMobileSidebarOpen(false);
   };
 
+  const handleMarkAsRead = async (destinationId, workspaceId = activeWorkspaceId) => {
+    if (!workspaceId || !destinationId || !user) return;
+
+    if (isConfigured) {
+      try {
+        const targets = (unreadNotifications || []).filter(
+          n => n.workspaceId === workspaceId && n.destinationId === destinationId
+        );
+        for (const notif of targets) {
+          await updateDoc(doc(db, 'notifications', notif.id), { isRead: true });
+        }
+      } catch (err) {
+        console.error('Error marking notifications as read:', err);
+      }
+    } else {
+      // LocalStorage emulation
+      const localKey = `slack_notifications_user_${user.uid}`;
+      const localNotifications = JSON.parse(localStorage.getItem(localKey) || '[]');
+      let updated = false;
+      const updatedList = localNotifications.map(n => {
+        if (n.workspaceId === workspaceId && n.destinationId === destinationId && !n.isRead) {
+          updated = true;
+          return { ...n, isRead: true };
+        }
+        return n;
+      });
+
+      if (updated) {
+        localStorage.setItem(localKey, JSON.stringify(updatedList));
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('slack_local_notifications_update'));
+      }
+    }
+  };
+
+  // Auto-clear active destination notifications instantly
+  useEffect(() => {
+    if (activeWorkspaceId && activeDestinationId && unreadNotifications.length > 0) {
+      const hasActiveUnreads = unreadNotifications.some(
+        n => n.workspaceId === activeWorkspaceId && n.destinationId === activeDestinationId
+      );
+      if (hasActiveUnreads) {
+        handleMarkAsRead(activeDestinationId, activeWorkspaceId);
+      }
+    }
+  }, [activeWorkspaceId, activeDestinationId, unreadNotifications]);
+
   // Send Message write action
   const handleSendMessage = async (content, fileAttachment = null, parentMessageId = null) => {
     if (!activeWorkspaceId || !activeDestinationId || !user) return;
@@ -469,6 +574,15 @@ function SlackDashboard({ user, logout }) {
     hours = hours % 12;
     hours = hours ? hours : 12;
     const timeString = `${hours}:${minutes} ${ampm}`;
+
+    // Mapped channel or DM name for previewing notifications
+    const activeWorkspaceRaw = workspaces.find(ws => ws.id === activeWorkspaceId);
+    let destName = '';
+    if (isDestinationDm) {
+      destName = activeWorkspaceRaw?.dms?.find(d => d.id === activeDestinationId)?.name || 'Direct Message';
+    } else {
+      destName = activeWorkspaceRaw?.channels?.find(c => c.id === activeDestinationId)?.name || 'channel';
+    }
 
     if (isConfigured) {
       // 1. Cloud Firestore write
@@ -500,15 +614,107 @@ function SlackDashboard({ user, logout }) {
           messageData.channelId = activeDestinationId;
         }
 
-        await addDoc(collection(db, 'messages'), messageData);
+        const msgDocRef = await addDoc(collection(db, 'messages'), messageData);
+
+        // ========================================================
+        // 1.1. GENERATE FIRESTORE REALTIME NOTIFICATIONS
+        // ========================================================
+        if (isDestinationDm) {
+          // Direct Message: Create exactly 1 notification document for the recipient
+          const notificationData = {
+            workspaceId: activeWorkspaceId,
+            userId: activeDestinationId,
+            senderId: user.uid,
+            senderName: user.name,
+            senderAvatar: user.avatarInitials,
+            content: content || 'shared an attachment',
+            type: 'dm',
+            destinationId: user.uid, // mapped to sender UID so recipient sees it under sender's name
+            destinationName: user.name,
+            isDestinationDm: true,
+            isRead: false,
+            messageId: msgDocRef.id,
+            createdAt: serverTimestamp()
+          };
+          console.log('✉️ Creating DM notification in Firestore for recipient:', activeDestinationId, notificationData);
+          await addDoc(collection(db, 'notifications'), notificationData);
+        } else {
+          // Channel Message or Thread Reply
+          const membersList = activeWorkspaceRaw?.members || [];
+          
+          if (parentMessageId) {
+            // Thread Reply: notify parent message sender and active thread members
+            const parentDoc = await getDoc(doc(db, 'messages', parentMessageId));
+            const parentSenderId = parentDoc.exists() ? parentDoc.data().senderId : null;
+
+            const notifiedUids = new Set();
+            if (parentSenderId && parentSenderId !== user.uid) {
+              notifiedUids.add(parentSenderId);
+            }
+
+            const repliesSnap = await getDocs(query(collection(db, 'messages'), where('parentMessageId', '==', parentMessageId)));
+            repliesSnap.forEach(replyDoc => {
+              const rId = replyDoc.data().senderId;
+              if (rId && rId !== user.uid) {
+                notifiedUids.add(rId);
+              }
+            });
+
+            for (const targetUid of notifiedUids) {
+              const notificationData = {
+                workspaceId: activeWorkspaceId,
+                userId: targetUid,
+                senderId: user.uid,
+                senderName: user.name,
+                senderAvatar: user.avatarInitials,
+                content: content || 'shared an attachment',
+                type: 'thread',
+                destinationId: activeDestinationId,
+                destinationName: destName,
+                isDestinationDm: false,
+                isRead: false,
+                parentMessageId: parentMessageId,
+                messageId: msgDocRef.id,
+                createdAt: serverTimestamp()
+              };
+              console.log('✉️ Creating Thread Reply notification in Firestore for:', targetUid, notificationData);
+              await addDoc(collection(db, 'notifications'), notificationData);
+            }
+          } else {
+            // Standard Channel Message: notify all workspace members except sender
+            console.log('✉️ Message sent. Evaluating workspace members to notify:', membersList);
+            for (const memberUid of membersList) {
+              if (memberUid !== user.uid) {
+                const notificationData = {
+                  workspaceId: activeWorkspaceId,
+                  userId: memberUid,
+                  senderId: user.uid,
+                  senderName: user.name,
+                  senderAvatar: user.avatarInitials,
+                  content: content || 'shared an attachment',
+                  type: 'channel',
+                  destinationId: activeDestinationId,
+                  destinationName: destName,
+                  isDestinationDm: false,
+                  isRead: false,
+                  messageId: msgDocRef.id,
+                  createdAt: serverTimestamp()
+                };
+                console.log('✉️ Creating Channel Message notification in Firestore for:', memberUid, notificationData);
+                await addDoc(collection(db, 'notifications'), notificationData);
+              }
+            }
+          }
+        }
       } catch (err) {
         console.error('Error writing message:', err);
       }
     } else {
       // 2. Emulator LocalStorage write
       const channelKey = `${activeWorkspaceId}-${activeDestinationId}`;
+      const newMsgId = `msg-${Date.now()}`;
       const newMessage = {
-        id: `msg-${Date.now()}`,
+        id: newMsgId,
         senderId: user.uid,
         senderName: user.name,
         content: content,
@@ -528,6 +734,58 @@ function SlackDashboard({ user, logout }) {
         ...prev,
         [channelKey]: [...(prev[channelKey] || []), newMessage]
       }));
+
+      // ========================================================
+      // 1.2. GENERATE EMULATOR REALTIME NOTIFICATIONS
+      // ========================================================
+      const membersList = activeWorkspaceRaw?.members || [];
+      if (isDestinationDm) {
+        const localNotifications = JSON.parse(localStorage.getItem(`slack_notifications_user_${activeDestinationId}`) || '[]');
+        localNotifications.push({
+          id: `notif-${Date.now()}`,
+          workspaceId: activeWorkspaceId,
+          userId: activeDestinationId,
+          senderId: user.uid,
+          senderName: user.name,
+          senderAvatar: user.avatarInitials,
+          content: content || 'shared an attachment',
+          type: 'dm',
+          destinationId: user.uid,
+          destinationName: user.name,
+          isDestinationDm: true,
+          isRead: false,
+          messageId: newMsgId,
+          createdAt: Date.now()
+        });
+        localStorage.setItem(`slack_notifications_user_${activeDestinationId}`, JSON.stringify(localNotifications));
+      } else {
+        for (const memberUid of membersList) {
+          if (memberUid !== user.uid) {
+            const localNotifications = JSON.parse(localStorage.getItem(`slack_notifications_user_${memberUid}`) || '[]');
+            localNotifications.push({
+              id: `notif-${Date.now()}`,
+              workspaceId: activeWorkspaceId,
+              userId: memberUid,
+              senderId: user.uid,
+              senderName: user.name,
+              senderAvatar: user.avatarInitials,
+              content: content || 'shared an attachment',
+              type: parentMessageId ? 'thread' : 'channel',
+              destinationId: activeDestinationId,
+              destinationName: destName,
+              isDestinationDm: false,
+              isRead: false,
+              messageId: newMsgId,
+              parentMessageId: parentMessageId || null,
+              createdAt: Date.now()
+            });
+            localStorage.setItem(`slack_notifications_user_${memberUid}`, JSON.stringify(localNotifications));
+          }
+        }
+      }
+      // Dispatch storage update
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new Event('slack_local_notifications_update'));
     }
   };
 
@@ -1003,6 +1261,25 @@ function SlackDashboard({ user, logout }) {
           members: arrayUnion(foundUser.uid)
         });
 
+        // ========================================================
+        // 1.3. GENERATE FIRESTORE REALTIME INVITE NOTIFICATION
+        // ========================================================
+        const inviteNotificationData = {
+          workspaceId: activeWorkspaceId,
+          userId: foundUser.uid,
+          senderId: user.uid,
+          senderName: user.name,
+          senderAvatar: user.avatarInitials,
+          content: `invited you to join the workspace "${activeWorkspaceRaw.name}"`,
+          type: 'invite',
+          destinationId: activeWorkspaceId,
+          destinationName: activeWorkspaceRaw.name,
+          isDestinationDm: false,
+          isRead: false,
+          createdAt: serverTimestamp()
+        };
+        await addDoc(collection(db, 'notifications'), inviteNotificationData);
+
         return { success: true, message: `${foundUser.name} has been invited successfully!` };
       } catch (err) {
         console.error('Error inviting user:', err);
@@ -1052,6 +1329,31 @@ function SlackDashboard({ user, logout }) {
             return ws;
           }));
 
+          // ========================================================
+          // 1.4. GENERATE EMULATOR REALTIME INVITE NOTIFICATION
+          // ========================================================
+          const targetUid = foundUser.uid || foundUser.id;
+          const localNotifications = JSON.parse(localStorage.getItem(`slack_notifications_user_${targetUid}`) || '[]');
+          localNotifications.push({
+            id: `notif-${Date.now()}`,
+            workspaceId: activeWorkspaceId,
+            userId: targetUid,
+            senderId: user.uid,
+            senderName: user.name,
+            senderAvatar: user.avatarInitials,
+            content: `invited you to join the workspace "${currentWorkspace.name}"`,
+            type: 'invite',
+            destinationId: activeWorkspaceId,
+            destinationName: currentWorkspace.name,
+            isDestinationDm: false,
+            isRead: false,
+            createdAt: Date.now()
+          });
+          localStorage.setItem(`slack_notifications_user_${targetUid}`, JSON.stringify(localNotifications));
+          
+          window.dispatchEvent(new Event('storage'));
+          window.dispatchEvent(new Event('slack_local_notifications_update'));
+
           resolve({ success: true, message: `${foundUser.name} has been invited successfully (emulated)!` });
         }, 600);
       });
@@ -1098,15 +1400,28 @@ function SlackDashboard({ user, logout }) {
     }
   };
 
-  const handleSearchJumpTo = (destId, isDm, messageId = null) => {
+  const handleSearchJumpTo = (destId, isDm, messageId = null, workspaceId = activeWorkspaceId, parentMessageId = null) => {
+    if (workspaceId && workspaceId !== activeWorkspaceId) {
+      setActiveWorkspaceId(workspaceId);
+    }
+    
     setActiveDestinationId(destId);
     setIsDestinationDm(isDm);
+    
+    if (parentMessageId) {
+      setActiveThreadMessageId(parentMessageId);
+    } else {
+      setActiveThreadMessageId(null);
+    }
     
     if (messageId) {
       setHighlightedMessageId(messageId);
     } else {
       setHighlightedMessageId(null);
     }
+
+    // Mark notifications for this destination as read instantly
+    handleMarkAsRead(destId, workspaceId || activeWorkspaceId);
   };
 
   // ========================================================
@@ -1169,6 +1484,7 @@ function SlackDashboard({ user, logout }) {
           activeWorkspaceId={activeWorkspaceId}
           onSelectWorkspace={handleSelectWorkspace}
           onAddWorkspaceClick={() => setActiveModal('create_workspace')}
+          unreadNotifications={unreadNotifications}
         />
         
         {/* Pass dynamically scoped workspace parameters */}
@@ -1190,6 +1506,7 @@ function SlackDashboard({ user, logout }) {
           onPreferencesClick={() => setActiveModal('preferences')}
           onHelpClick={() => setActiveModal('help_feedback')}
           compactMode={compactMode}
+          unreadNotifications={unreadNotifications}
         />
       </div>
 
@@ -1211,6 +1528,7 @@ function SlackDashboard({ user, logout }) {
                 setActiveModal('create_workspace');
                 setMobileSidebarOpen(false);
               }}
+              unreadNotifications={unreadNotifications}
             />
             
             <ChannelNav
@@ -1247,6 +1565,7 @@ function SlackDashboard({ user, logout }) {
                 setMobileSidebarOpen(false);
               }}
               compactMode={compactMode}
+              unreadNotifications={unreadNotifications}
             />
           </div>
         </div>
@@ -1287,6 +1606,15 @@ function SlackDashboard({ user, logout }) {
           onChannelSettingsClick={() => {
             const ch = activeWorkspace?.channels?.find(c => c.id === activeDestinationId);
             if (ch) setChannelSettingsTarget(ch);
+          }}
+          unreadNotifications={unreadNotifications}
+          onJumpTo={handleSearchJumpTo}
+          onMarkAllAsRead={() => {
+            unreadNotifications.forEach(n => {
+              if (n.workspaceId === activeWorkspaceId) {
+                handleMarkAsRead(n.destinationId, activeWorkspaceId);
+              }
+            });
           }}
         />
 

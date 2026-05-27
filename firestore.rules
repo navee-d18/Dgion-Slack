@@ -64,5 +64,11 @@ service cloud.firestore {
         || isWorkspaceCreator(resource.data.workspaceId)
       );
     }
+
+    // 5. Notifications Collection Rules
+    match /notifications/{notificationId} {
+      allow create: if isSignedIn() && isMemberOfWorkspace(request.resource.data.workspaceId);
+      allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
   }
 }
