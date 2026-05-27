@@ -1,0 +1,178 @@
+@import "tailwindcss";
+
+/* Modern Tailwind CSS v4 Global Theme Configuration */
+@theme {
+  --color-slack-purple-deep: #3F0E40;     /* Left Workspace Sidebar */
+  --color-slack-purple-mid: #522653;      /* Channel Navigation Sidebar */
+  --color-slack-purple-light: #613064;    /* Hover channel nav */
+  --color-slack-purple-hover: #350d36;    /* Deep sidebar hover */
+  --color-slack-purple-selected: #1164A3; /* Accent color (Slack blue) */
+  --color-slack-dark: #1D1C1D;           /* Dark primary text */
+  --color-slack-muted: #616061;          /* Muted gray text */
+  --color-slack-bg: #F8F8F8;             /* Off-white background */
+  --color-slack-border: #E8E8E8;         /* Custom light border color */
+  --color-slack-light-border: #E8E8E8;   /* Secondary light border */
+  --color-slack-avatar-online: #2BAC76;  /* Slack online green */
+  --color-slack-avatar-away: #D1D2D3;    /* Slack away gray */
+  
+  --shadow-slack-header: 0 1px 0 0 rgba(0, 0, 0, 0.1);
+  --shadow-slack-popover: 0 0 0 1px rgba(29, 28, 29, 0.13), 0 4px 12px 0 rgba(0, 0, 0, 0.08);
+  --shadow-slack-modal: 0 0 0 1px rgba(29, 28, 29, 0.13), 0 12px 24px 0 rgba(0, 0, 0, 0.15);
+}
+
+/* Custom elegant scrollbar styles matching Slack web client */
+@utility custom-scrollbar {
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 9999px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.3);
+  }
+}
+
+@utility custom-scrollbar-dark {
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 9999px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+  }
+}
+
+@utility transition-slack {
+  transition: all 0.12s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@utility modal-backdrop {
+  backdrop-filter: blur(2px);
+  background-color: rgba(29, 28, 29, 0.4);
+}
+
+/* Base styles and clean system defaults */
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #1D1C1D;
+  background-color: #ffffff;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Text selections matching Slack style */
+::selection {
+  background-color: rgba(17, 100, 163, 0.2);
+}
+
+/* Form inputs visual adjustments */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0px 1000px white inset !important;
+  box-shadow: 0 0 0px 1000px white inset !important;
+}
+
+/* ========================================================
+   PREMIUM DARK MODE OVERRIDES
+   ======================================================== */
+.dark-theme {
+  background-color: #1A1D21 !important;
+  color: #D1D2D3 !important;
+}
+
+/* Core Layouts */
+.dark-theme main,
+.dark-theme header,
+.dark-theme footer,
+.dark-theme .bg-white,
+.dark-theme .bg-\[\#FFFFFF\] {
+  background-color: #1A1D21 !important;
+  color: #D1D2D3 !important;
+  border-color: #2D3136 !important;
+}
+
+/* Sidebar overrides */
+.dark-theme .bg-slate-50 {
+  background-color: #222529 !important;
+  border-color: #2D3136 !important;
+}
+
+/* Text selections & Colors */
+.dark-theme .text-\[\#1D1C1D\],
+.dark-theme .text-\[\#1d1c1d\],
+.dark-theme .text-slate-800,
+.dark-theme .text-\[\#1D1C1D\]:hover,
+.dark-theme .text-slate-700 {
+  color: #E8ECEF !important;
+}
+
+.dark-theme .text-\[\#616061\],
+.dark-theme .text-slate-500,
+.dark-theme .text-slate-400 {
+  color: #9BA2A6 !important;
+}
+
+/* Buttons and Hover states */
+.dark-theme .hover\:bg-slate-50:hover,
+.dark-theme .hover\:bg-slate-100:hover,
+.dark-theme .group\/btn:hover,
+.dark-theme button:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Textareas, Inputs & Forms */
+.dark-theme textarea,
+.dark-theme input {
+  background-color: #222529 !important;
+  color: #E8ECEF !important;
+  border-color: #383C42 !important;
+}
+
+.dark-theme textarea:focus,
+.dark-theme input:focus {
+  border-color: #1164A3 !important;
+}
+
+/* Modal specific boxes */
+.dark-theme div[role="dialog"] > div.bg-white {
+  background-color: #1A1D21 !important;
+  color: #D1D2D3 !important;
+  border-color: #383C42 !important;
+}
+
+.dark-theme div[role="dialog"] .border-b,
+.dark-theme div[role="dialog"] .border-t {
+  border-color: #2D3136 !important;
+}
+
+/* Message highlight */
+.dark-theme .bg-yellow-50 {
+  background-color: rgba(235, 178, 46, 0.08) !important;
+  border-left-color: #ECB22E !important;
+}
+
