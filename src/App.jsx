@@ -7,7 +7,7 @@ import ThreadPanel from './components/ThreadPanel';
 import { 
   CreateChannelModal, CreateWorkspaceModal, SearchModal, InviteWorkspaceModal, 
   EditDeleteChannelModal, JoinWorkspaceModal, WorkspaceSettingsModal, 
-  PreferencesModal, HelpFeedbackModal 
+  PreferencesModal, HelpFeedbackModal, UserProfileModal 
 } from './components/Modals';
 import { useAuth } from './context/AuthContext';
 import AuthScreens from './components/AuthScreens';
@@ -65,6 +65,7 @@ function SlackDashboard({ user, logout }) {
   const [activeThreadMessageId, setActiveThreadMessageId] = useState(null);
   const [unreadNotifications, setUnreadNotifications] = useState([]);
   const [activeTypers, setActiveTypers] = useState([]);
+  const [selectedProfileUser, setSelectedProfileUser] = useState(null);
 
   // Preference States
   const [theme, setTheme] = useState(() => localStorage.getItem('slack_theme') || 'light');
@@ -637,6 +638,21 @@ function SlackDashboard({ user, logout }) {
     setMobileSidebarOpen(false);
   };
 
+  const handleOpenProfile = (uid) => {
+    const member = activeWorkspace?.allWorkspaceMembers?.find(m => m.id === uid);
+    if (member) {
+      setSelectedProfileUser(member);
+    } else {
+      setSelectedProfileUser({
+        id: uid,
+        name: 'Unavailable User',
+        email: 'N/A',
+        role: 'N/A',
+        isUnavailable: true
+      });
+    }
+  };
+
   const handleMarkAsRead = async (destinationId, workspaceId = activeWorkspaceId) => {
     if (!workspaceId || !destinationId || !user) return;
 
@@ -876,6 +892,10 @@ function SlackDashboard({ user, logout }) {
             console.log('✉️ Message sent. Evaluating workspace members to notify:', membersList);
             for (const memberUid of membersList) {
               if (memberUid !== user.uid) {
+                const memberUser = allRegisteredUsers.find(u => u.uid === memberUid);
+                const isMentioned = memberUser && content && content.includes(`@${memberUser.name}`);
+                const notificationType = isMentioned ? 'mention' : 'channel';
+
                 const notificationData = {
                   workspaceId: activeWorkspaceId,
                   userId: memberUid,
@@ -883,7 +903,7 @@ function SlackDashboard({ user, logout }) {
                   senderName: user.name,
                   senderAvatar: user.avatarInitials,
                   content: content || 'shared an attachment',
-                  type: 'channel',
+                  type: notificationType,
                   destinationId: activeDestinationId,
                   destinationName: destName,
                   isDestinationDm: false,
@@ -952,6 +972,10 @@ function SlackDashboard({ user, logout }) {
       } else {
         for (const memberUid of membersList) {
           if (memberUid !== user.uid) {
+            const memberUser = workspaceMembersRaw.find(u => (u.uid || u.id) === memberUid);
+            const isMentioned = memberUser && content && content.includes(`@${memberUser.name}`);
+            const notificationType = parentMessageId ? 'thread' : (isMentioned ? 'mention' : 'channel');
+
             const localNotifications = JSON.parse(localStorage.getItem(`slack_notifications_user_${memberUid}`) || '[]');
             localNotifications.push({
               id: `notif-${Date.now()}`,
@@ -961,7 +985,7 @@ function SlackDashboard({ user, logout }) {
               senderName: user.name,
               senderAvatar: user.avatarInitials,
               content: content || 'shared an attachment',
-              type: parentMessageId ? 'thread' : 'channel',
+              type: notificationType,
               destinationId: activeDestinationId,
               destinationName: destName,
               isDestinationDm: false,
@@ -1627,14 +1651,27 @@ function SlackDashboard({ user, logout }) {
     ? allRegisteredUsers.filter(u => activeWorkspaceRaw?.members?.includes(u.uid))
     : activeWorkspaceRaw?.dms || [];
 
-  const formattedDms = workspaceMembersRaw.map(u => ({
-    id: u.uid || u.id,
-    name: u.name,
-    email: u.email,
-    avatar: u.avatarInitials,
-    status: u.onlineStatus || 'offline',
-    role: u.role || 'Workspace Member'
-  }));
+  const formattedDms = workspaceMembersRaw.map(u => {
+    const memberId = u.uid || u.id;
+    const isOwner = activeWorkspaceRaw?.createdBy === memberId;
+    const isCurrentUser = memberId === user?.uid;
+    
+    let roleText = u.role || 'Workspace Member';
+    if (isOwner) {
+      roleText = isCurrentUser ? 'Workspace Owner (Me)' : 'Workspace Owner';
+    } else if (isCurrentUser) {
+      roleText = 'Workspace Member (Me)';
+    }
+
+    return {
+      id: memberId,
+      name: u.name,
+      email: u.email,
+      avatar: u.avatarInitials,
+      status: u.onlineStatus || 'offline',
+      role: roleText
+    };
+  });
 
   const activeWorkspace = activeWorkspaceRaw ? {
     ...activeWorkspaceRaw,
@@ -1810,6 +1847,7 @@ function SlackDashboard({ user, logout }) {
           activeTypers={activeTypers}
           onTypingStart={handleTypingStart}
           onTypingStop={handleTypingStop}
+          onOpenProfile={handleOpenProfile}
         />
 
         {/* Right side panels: either ThreadPanel or MembersPanel */}
@@ -1907,6 +1945,12 @@ function SlackDashboard({ user, logout }) {
       <HelpFeedbackModal
         isOpen={activeModal === 'help_feedback'}
         onClose={() => setActiveModal(null)}
+      />
+
+      <UserProfileModal
+        isOpen={!!selectedProfileUser}
+        onClose={() => setSelectedProfileUser(null)}
+        user={selectedProfileUser}
       />
 
       {/* Floating Sync Error Notification Banner */}

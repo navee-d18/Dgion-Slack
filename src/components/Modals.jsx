@@ -1733,5 +1733,98 @@ export function HelpFeedbackModal({ isOpen, onClose }) {
   );
 }
 
+export function UserProfileModal({ isOpen, onClose, user }) {
+  if (!isOpen || !user) return null;
+
+  const getAvatarColorClass = (name) => {
+    const colors = [
+      'bg-[#E01E5A]', 'bg-[#36C5F0]', 'bg-[#2BAC76]', 
+      'bg-[#ECB22E]', 'bg-[#613064]', 'bg-[#1164A3]'
+    ];
+    let sum = 0;
+    for (let i = 0; i < name.length; i++) sum += name.charCodeAt(i);
+    return colors[sum % colors.length];
+  };
+
+  const getInitials = (name) => {
+    return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+  };
+
+  return (
+    <div 
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-[2px] flex items-center justify-center z-[200] p-4 animate-in fade-in duration-150 font-sans"
+      onClick={onClose}
+    >
+      <div 
+        className="w-full max-w-sm bg-white rounded-xl shadow-slack-popover overflow-hidden flex flex-col border border-[#E8E8E8] animate-in zoom-in-95 duration-150 relative"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Cover Accent */}
+        <div className="h-16 bg-[#522653] w-full relative" />
+
+        {/* Close Button */}
+        <button
+          onClick={onClose}
+          className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/10 hover:bg-black/20 text-white transition-colors"
+          aria-label="Close modal"
+        >
+          <X className="w-4 h-4" />
+        </button>
+
+        {/* Profile Card Body */}
+        <div className="px-6 pb-6 relative flex flex-col items-center">
+          {/* Large Avatar */}
+          <div className={`w-20 h-20 rounded-2xl border-4 border-white text-white font-extrabold flex items-center justify-center text-2xl shadow-md -mt-10 select-none ${getAvatarColorClass(user.name || 'Unknown')}`}>
+            {getInitials(user.name || 'US')}
+          </div>
+
+          {/* Member Name */}
+          <h2 className="text-lg font-extrabold text-[#1D1C1D] mt-3 tracking-tight">
+            {user.name}
+          </h2>
+
+          {/* Online Status Badge */}
+          {!user.isUnavailable && (
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <span className={`w-2 h-2 rounded-full ${user.status === 'online' ? 'bg-[#2BAC76]' : 'bg-slate-300'}`} />
+              <span className="text-xs font-bold text-slate-500 capitalize">{user.status || 'offline'}</span>
+            </div>
+          )}
+
+          {/* Divider */}
+          <div className="w-full border-t border-slate-100 my-4" />
+
+          {/* Fields */}
+          {user.isUnavailable ? (
+            <div className="w-full text-center py-2">
+              <p className="text-sm font-bold text-red-500">User no longer available</p>
+              <p className="text-[11px] text-slate-400 font-medium mt-1">This user is no longer a member of this workspace.</p>
+            </div>
+          ) : (
+            <div className="w-full space-y-3.5 text-left">
+              <div className="flex items-start gap-3">
+                <Briefcase className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Role</p>
+                  <p className="text-xs font-bold text-slate-700 mt-0.5">{user.role || 'Workspace Member'}</p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <Mail className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Email Address</p>
+                  <p className="text-xs font-bold text-slate-700 mt-0.5 select-all truncate">{user.email || 'No email shared'}</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 
 

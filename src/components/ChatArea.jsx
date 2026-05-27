@@ -69,7 +69,7 @@ const formatDateHeader = (date) => {
 };
 
 // Inline Markdown Parser to convert simple formatting tokens to HTML
-const renderFormattedContent = (content) => {
+const renderFormattedContent = (content, members = []) => {
   if (!content) return '';
   
   const escapeHTML = (text) => {
@@ -82,6 +82,19 @@ const renderFormattedContent = (content) => {
   };
 
   let html = escapeHTML(content);
+
+  // Parse exact workspace members mentions safely
+  if (members && members.length > 0) {
+    // Sort members by name length descending to avoid prefix collision
+    const sortedMembers = [...members].sort((a, b) => b.name.length - a.name.length);
+    sortedMembers.forEach(member => {
+      // Escape special characters in member name for RegExp
+      const escapedName = member.name.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      // Match exact name after '@', checking boundaries dynamically (space, punctuation, end of line, word boundaries)
+      const regex = new RegExp(`@(${escapedName})(?=\\s|[.,!?]|$|\\b)`, 'g');
+      html = html.replace(regex, `<span class="mention-link cursor-pointer text-[#1164A3] bg-[#E8F5FA] hover:bg-[#D0ECF7] px-1.5 py-0.5 rounded font-bold transition-colors select-none" data-uid="${member.id}">@$1</span>`);
+    });
+  }
 
   // 1. Bold: **text**
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
@@ -98,7 +111,7 @@ const renderFormattedContent = (content) => {
   // 5. Link: [label](url)
   html = html.replace(/\[(.*?)\]\((https?:\/\/.*?|mailto:.*?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-[#1164A3] hover:underline font-bold font-sans">$1</a>');
 
-  return <span dangerouslySetInnerHTML={{ __html: html }} className="break-words whitespace-pre-wrap inline" />;
+  return <span dangerouslySetInnerHTML={{ __html: html }} className="break-words whitespace-pre-wrap inline animate-in fade-in duration-100" />;
 };
 
 const FullEmojiPicker = ({ onSelectEmoji, onClose }) => {
@@ -224,7 +237,8 @@ export default function ChatArea({
   onMarkAllAsRead,
   activeTypers = [],
   onTypingStart,
-  onTypingStop
+  onTypingStop,
+  onOpenProfile
 }) {
   const { user, loading } = useAuth();
   const isCreator = activeWorkspace?.createdBy === user?.uid;
@@ -275,10 +289,34 @@ export default function ChatArea({
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editText, setEditText] = useState('');
 
+  // Mention States
+  const [mentionQuery, setMentionQuery] = useState(null); // string query or null if dropdown closed
+  const [mentionStartIndex, setMentionStartIndex] = useState(-1); // where '@' starts
+  const [selectedMentionIndex, setSelectedMentionIndex] = useState(0); // active dropdown selection index
+
+  // Filtered members list for mention dropdown
+  const filteredMembers = React.useMemo(() => {
+    if (mentionQuery === null || !activeWorkspace?.allWorkspaceMembers) return [];
+    const query = mentionQuery.toLowerCase();
+    return activeWorkspace.allWorkspaceMembers.filter(member =>
+      member.name.toLowerCase().includes(query)
+    );
+  }, [mentionQuery, activeWorkspace?.allWorkspaceMembers]);
+
   const handleEditClick = (msg) => {
     setEditingMessageId(msg.id);
     setEditText(msg.content);
     setActiveMenuMessageId(null);
+  };
+
+  const handleContainerClick = (e) => {
+    const mentionLink = e.target.closest('.mention-link');
+    if (mentionLink) {
+      const uid = mentionLink.getAttribute('data-uid');
+      if (uid && onOpenProfile) {
+        onOpenProfile(uid);
+      }
+    }
   };
 
   const getUserName = (uid) => {
@@ -511,6 +549,22 @@ export default function ChatArea({
     const val = e.target.value;
     setInputText(val);
 
+    // Mentions check
+    const cursor = e.target.selectionStart;
+    const textBeforeCursor = val.substring(0, cursor);
+    const lastWordMatch = textBeforeCursor.match(/(?:\s|^)@([a-zA-Z0-9_]*)$/);
+
+    if (lastWordMatch) {
+      const matchText = lastWordMatch[1];
+      const startIndex = lastWordMatch.index + lastWordMatch[0].indexOf('@');
+      setMentionQuery(matchText);
+      setMentionStartIndex(startIndex);
+      setSelectedMentionIndex(0);
+    } else {
+      setMentionQuery(null);
+      setMentionStartIndex(-1);
+    }
+
     if (val.trim().length > 0) {
       if (!isTypingState) {
         setIsTypingState(true);
@@ -533,6 +587,29 @@ export default function ChatArea({
     }
   };
 
+  const insertMentionSelection = (member) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const val = textarea.value;
+    const before = val.substring(0, mentionStartIndex);
+    const after = val.substring(textarea.selectionStart);
+    const mentionText = `@${member.name} `;
+    const newVal = before + mentionText + after;
+
+    setInputText(newVal);
+    setMentionQuery(null);
+    setMentionStartIndex(-1);
+
+    // Set cursor focus and position after the inserted mention
+    setTimeout(() => {
+      textarea.focus();
+      const newCursorPos = mentionStartIndex + mentionText.length;
+      textarea.selectionStart = newCursorPos;
+      textarea.selectionEnd = newCursorPos;
+    }, 50);
+  };
+
   const handleSend = () => {
     if (!inputText.trim() && !attachment) return;
     onSendMessage(inputText, attachment);
@@ -540,6 +617,8 @@ export default function ChatArea({
     setAttachment(null);
     setShowLinkModal(false);
     setShowEmojiPicker(false);
+    setMentionQuery(null);
+    setMentionStartIndex(-1);
 
     // Clear typing timeout and stop typing instantly!
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -548,6 +627,27 @@ export default function ChatArea({
   };
 
   const handleKeyDown = (e) => {
+    if (mentionQuery !== null && filteredMembers.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedMentionIndex(prev => (prev + 1) % filteredMembers.length);
+        return;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedMentionIndex(prev => (prev - 1 + filteredMembers.length) % filteredMembers.length);
+        return;
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        insertMentionSelection(filteredMembers[selectedMentionIndex]);
+        return;
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setMentionQuery(null);
+        setMentionStartIndex(-1);
+        return;
+      }
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
       e.preventDefault();
       insertMarkdown('bold');
@@ -911,13 +1011,13 @@ export default function ChatArea({
                                 </span>
                               </div>
                               <p className="text-[10px] text-slate-500 font-bold mt-0.5 flex items-center gap-1 select-none">
-                                <span>in</span>
+                                <span>{notif.type === 'mention' ? 'mentioned you in' : 'in'}</span>
                                 <span className="text-[#1164A3] truncate">
                                   {notif.type === 'dm' ? 'Direct Message' : notif.type === 'invite' ? 'Invites' : `#${notif.destinationName}`}
                                 </span>
                               </p>
                               <p className="text-[11.5px] text-slate-700 font-normal truncate mt-1 leading-normal">
-                                {notif.content}
+                                {renderFormattedContent(notif.content, activeWorkspace?.allWorkspaceMembers)}
                               </p>
                             </div>
                           </button>
@@ -949,6 +1049,7 @@ export default function ChatArea({
       <div 
         ref={containerRef}
         className="flex-1 overflow-y-auto custom-scrollbar px-6 py-6 space-y-5 bg-[#FFFFFF] relative"
+        onClick={handleContainerClick}
       >
         {messagesLoading && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 select-none z-10 animate-in fade-in duration-150">
@@ -1172,7 +1273,7 @@ export default function ChatArea({
                             </div>
                           ) : (
                             <div className="text-[15px] text-[#1D1C1D] leading-relaxed break-words">
-                              <span className="inline">{renderFormattedContent(msg.content)}</span>
+                              <span className="inline">{renderFormattedContent(msg.content, activeWorkspace?.allWorkspaceMembers)}</span>
                               {msg.isEdited && <span className="text-[10px] text-slate-400 font-semibold ml-1.5 select-none inline-block align-baseline" title="This message has been edited">(edited)</span>}
                               {bookmarks[msg.id] && <Bookmark className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0 ml-1.5 inline-block align-middle animate-in zoom-in-95 duration-100" title="Bookmarked message" />}
                               {msg.file && renderAttachment(msg.file)}
@@ -1242,7 +1343,7 @@ export default function ChatArea({
                             </div>
                           ) : (
                             <div className="text-[15px] text-[#1D1C1D] leading-relaxed">
-                              {renderFormattedContent(msg.content)}
+                              {renderFormattedContent(msg.content, activeWorkspace?.allWorkspaceMembers)}
                               {msg.file && renderAttachment(msg.file)}
                             </div>
                           )}
@@ -1283,7 +1384,44 @@ export default function ChatArea({
             </div>
           )}
         </div>
-        <div className="border border-[#E8E8E8] focus-within:ring-1 focus-within:ring-[#1164A3] focus-within:border-[#1164A3] rounded-xl flex flex-col overflow-hidden bg-white shadow-sm transition-all duration-100 bg-white">
+        <div className="relative">
+          {/* Mention Dropdown list */}
+          {mentionQuery !== null && filteredMembers.length > 0 && (
+            <div className="absolute bottom-[calc(100%+8px)] left-0 w-64 bg-white border border-[#E8E8E8] rounded-xl shadow-slack-popover max-h-56 overflow-y-auto flex flex-col z-[110] animate-in fade-in slide-in-from-bottom-2 duration-150 font-sans select-none">
+              {filteredMembers.map((member, idx) => {
+                const isSelected = idx === selectedMentionIndex;
+                return (
+                  <button
+                    key={member.id}
+                    type="button"
+                    onClick={() => insertMentionSelection(member)}
+                    onMouseEnter={() => setSelectedMentionIndex(idx)}
+                    className={`w-full px-4 py-2.5 sm:py-3 flex items-center gap-2.5 text-left text-sm font-semibold transition-colors cursor-pointer ${
+                      isSelected ? 'bg-[#1164A3] text-white' : 'hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <div className={`w-6.5 h-6.5 rounded-full text-white font-black flex items-center justify-center text-[9px] shrink-0 ${
+                      isSelected ? 'bg-white/20' : getAvatarColorClass(member.name)
+                    }`}>
+                      {getInitials(member.name)}
+                    </div>
+                    <div className="flex-1 truncate">
+                      <span>{member.name}</span>
+                      {member.role && (
+                        <span className={`text-[10px] ml-1.5 font-medium ${
+                          isSelected ? 'text-white/60' : 'text-slate-400'
+                        }`}>
+                          {member.role}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="border border-[#E8E8E8] focus-within:ring-1 focus-within:ring-[#1164A3] focus-within:border-[#1164A3] rounded-xl flex flex-col overflow-hidden bg-white shadow-sm transition-all duration-100 bg-white">
           
           {/* Removable staged attachment pill */}
           {attachment && (
@@ -1482,6 +1620,7 @@ export default function ChatArea({
             </button>
           </div>
         </div>
+      </div>
         
         <div className="text-[11px] text-[#616061] mt-1.5 px-2 flex items-center justify-between select-none">
           <span><b>Shift + Enter</b> to add a new line • <b>Ctrl + B</b>/<b>I</b> formatting shortcuts</span>
