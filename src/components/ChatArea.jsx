@@ -3,7 +3,7 @@ import {
   Hash, Lock, Search, Users, Menu, Send, Bold, Italic, 
   Strikethrough, Code, Link, Paperclip, Smile, HelpCircle, 
   MoreHorizontal, MessageSquare, Bookmark, SmilePlus, Loader2, Settings, Briefcase,
-  X, FileText, Trash2, Edit, Bell, BellOff
+  X, FileText, Trash2, Edit, Bell, BellOff, Pin
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -69,7 +69,7 @@ const formatDateHeader = (date) => {
 };
 
 // Inline Markdown Parser to convert simple formatting tokens to HTML
-const renderFormattedContent = (content, members = []) => {
+export const renderFormattedContent = (content, members = []) => {
   if (!content) return '';
   
   const escapeHTML = (text) => {
@@ -238,7 +238,10 @@ export default function ChatArea({
   activeTypers = [],
   onTypingStart,
   onTypingStop,
-  onOpenProfile
+  onOpenProfile,
+  pinnedPanelOpen = false,
+  onTogglePinnedPanel,
+  onTogglePinMessage
 }) {
   const { user, loading } = useAuth();
   const isCreator = activeWorkspace?.createdBy === user?.uid;
@@ -265,6 +268,7 @@ export default function ChatArea({
 
   const channelKey = activeWorkspace ? `${activeWorkspace.id}-${activeDestinationId}` : '';
   const activeMessages = messages[channelKey] || [];
+  const pinnedCount = activeMessages.filter(m => m.isPinned).length;
 
   // Rich Composer states
   const [showLinkModal, setShowLinkModal] = useState(false);
@@ -1030,6 +1034,23 @@ export default function ChatArea({
             )}
           </div>
 
+          {/* Pinned Messages Button */}
+          <button
+            onClick={onTogglePinnedPanel}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-amber-600 hover:text-amber-800 hover:bg-amber-50 shrink-0 transition-colors border active:scale-[0.97] transition-all font-sans relative ${
+              pinnedPanelOpen ? 'bg-amber-50 text-amber-800 border-amber-200 shadow-sm font-extrabold' : 'font-bold border-transparent bg-transparent'
+            }`}
+            aria-label="Toggle pinned messages"
+            title="Pinned Messages"
+          >
+            <Pin className={`w-4 h-4 shrink-0 text-amber-500 ${pinnedPanelOpen ? 'fill-amber-500' : ''}`} />
+            {pinnedCount > 0 && (
+              <span className="text-xs font-black leading-none bg-amber-100 px-1.5 py-0.5 rounded-full shrink-0">
+                {pinnedCount}
+              </span>
+            )}
+          </button>
+
           <button
             onClick={onToggleRightPanel}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-slate-800 shrink-0 transition-colors border border-transparent active:scale-[0.97] transition-all font-sans ${
@@ -1087,6 +1108,7 @@ export default function ChatArea({
 
               // Sender of this message is current user OR current user is workspace creator
               const canDelete = msg.senderId === user?.uid || isCreator;
+              const canTogglePin = msg.senderId === user?.uid || isCreator;
 
               return (
                 <div key={msg.id} className="flex flex-col animate-in fade-in duration-100">
@@ -1098,6 +1120,13 @@ export default function ChatArea({
                         {formatDateHeader(currentDate)}
                       </span>
                       <div className="flex-1 h-[1px] bg-slate-200" />
+                    </div>
+                  )}
+
+                  {msg.isPinned && (
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-amber-600 ml-[54px] mt-1.5 -mb-0.5 select-none animate-in fade-in duration-100">
+                      <Pin className="w-3 h-3 fill-amber-500 text-amber-500 shrink-0" />
+                      <span>Pinned</span>
                     </div>
                   )}
 
@@ -1200,6 +1229,20 @@ export default function ChatArea({
                                 <Edit className="w-3.5 h-3.5" />
                                 <span>Edit message</span>
                               </button>
+
+                              {/* Pin / Unpin option */}
+                              {canTogglePin ? (
+                                <button
+                                  onClick={() => {
+                                    if (onTogglePinMessage) onTogglePinMessage(msg.id);
+                                    setActiveMenuMessageId(null);
+                                  }}
+                                  className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer transition-colors border-t border-slate-100"
+                                >
+                                  <Pin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                                  <span>{msg.isPinned ? 'Unpin message' : 'Pin message'}</span>
+                                </button>
+                              ) : null}
 
                               {/* Delete Message option */}
                               {canDelete ? (

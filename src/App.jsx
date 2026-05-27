@@ -4,6 +4,7 @@ import ChannelNav from './components/ChannelNav';
 import ChatArea from './components/ChatArea';
 import MembersPanel from './components/MembersPanel';
 import ThreadPanel from './components/ThreadPanel';
+import PinnedPanel from './components/PinnedPanel';
 import { 
   CreateChannelModal, CreateWorkspaceModal, SearchModal, InviteWorkspaceModal, 
   EditDeleteChannelModal, JoinWorkspaceModal, WorkspaceSettingsModal, 
@@ -57,6 +58,7 @@ function SlackDashboard({ user, logout }) {
   const [channelsLoading, setChannelsLoading] = useState(isConfigured);
   
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [pinnedPanelOpen, setPinnedPanelOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [activeModal, setActiveModal] = useState(null); // 'create_channel' | 'create_workspace' | 'search' | null
   const [highlightedMessageId, setHighlightedMessageId] = useState(null);
@@ -1053,6 +1055,44 @@ function SlackDashboard({ user, logout }) {
     }
   };
 
+  const handleTogglePinMessage = async (messageId) => {
+    if (!activeWorkspaceId || !activeDestinationId || !user) return;
+
+    const channelKey = `${activeWorkspaceId}-${activeDestinationId}`;
+    const activeMessages = messages[channelKey] || [];
+    const msg = activeMessages.find(m => m.id === messageId);
+    if (!msg) return;
+
+    const isSender = msg.senderId === user.uid;
+    const isCreator = activeWorkspace?.createdBy === user.uid;
+    const isPinned = !!msg.isPinned;
+
+    if (!isSender && !isCreator) {
+      console.warn("Permission denied for toggle pin");
+      return;
+    }
+
+    if (isConfigured) {
+      try {
+        await updateDoc(doc(db, 'messages', messageId), {
+          isPinned: !isPinned
+        });
+      } catch (err) {
+        console.error('Error toggling pin message:', err);
+        throw err;
+      }
+    } else {
+      // Emulator LocalStorage pinning
+      setMessages(prev => {
+        const list = prev[channelKey] || [];
+        return {
+          ...prev,
+          [channelKey]: list.map(m => m.id === messageId ? { ...m, isPinned: !isPinned } : m)
+        };
+      });
+    }
+  };
+
   const handleToggleReaction = async (messageId, emoji) => {
     if (!activeWorkspaceId || !activeDestinationId || !user) return;
 
@@ -1815,16 +1855,18 @@ function SlackDashboard({ user, logout }) {
           onOpenThread={(msgId) => {
             setActiveThreadMessageId(msgId);
             setRightPanelOpen(false);
+            setPinnedPanelOpen(false);
           }}
           onOpenSearch={() => setActiveModal('search')}
           onToggleRightPanel={() => {
+            setPinnedPanelOpen(false);
             if (activeThreadMessageId) {
               setActiveThreadMessageId(null);
             } else {
               setRightPanelOpen(!rightPanelOpen);
             }
           }}
-          rightPanelOpen={rightPanelOpen || !!activeThreadMessageId}
+          rightPanelOpen={rightPanelOpen || !!activeThreadMessageId || pinnedPanelOpen}
           onOpenMobileDrawer={() => setMobileSidebarOpen(true)}
           highlightedMessageId={highlightedMessageId}
           clearHighlight={() => setHighlightedMessageId(null)}
@@ -1848,9 +1890,16 @@ function SlackDashboard({ user, logout }) {
           onTypingStart={handleTypingStart}
           onTypingStop={handleTypingStop}
           onOpenProfile={handleOpenProfile}
+          pinnedPanelOpen={pinnedPanelOpen}
+          onTogglePinnedPanel={() => {
+            setPinnedPanelOpen(!pinnedPanelOpen);
+            setActiveThreadMessageId(null);
+            setRightPanelOpen(false);
+          }}
+          onTogglePinMessage={handleTogglePinMessage}
         />
 
-        {/* Right side panels: either ThreadPanel or MembersPanel */}
+        {/* Right side panels: either ThreadPanel, PinnedPanel, or MembersPanel */}
         {activeThreadMessageId && activeWorkspace ? (
           <ThreadPanel
             activeWorkspace={activeWorkspace}
@@ -1863,6 +1912,17 @@ function SlackDashboard({ user, logout }) {
             onToggleReaction={handleToggleReaction}
             activeThreadMessageId={activeThreadMessageId}
             onClose={() => setActiveThreadMessageId(null)}
+            currentUser={user}
+          />
+        ) : pinnedPanelOpen && activeWorkspace ? (
+          <PinnedPanel
+            activeWorkspace={activeWorkspace}
+            activeDestinationId={activeDestinationId}
+            isDestinationDm={isDestinationDm}
+            messages={messages}
+            onClose={() => setPinnedPanelOpen(false)}
+            onJumpTo={handleSearchJumpTo}
+            onTogglePinMessage={handleTogglePinMessage}
             currentUser={user}
           />
         ) : rightPanelOpen && activeWorkspace ? (
