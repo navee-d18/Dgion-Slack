@@ -801,7 +801,7 @@ function SlackDashboard({ user, logout }) {
           members: [user.uid]
         });
 
-        // 2. Automatically create general and random channels inside it
+        // 2. Automatically create general and announcement channels inside it
         const genRef = await addDoc(collection(db, 'channels'), {
           workspaceId: wsRef.id,
           name: 'general',
@@ -813,8 +813,8 @@ function SlackDashboard({ user, logout }) {
 
         await addDoc(collection(db, 'channels'), {
           workspaceId: wsRef.id,
-          name: 'random',
-          description: 'Non-work banter and watercooler chat',
+          name: 'announcement',
+          description: 'Official workspace announcements and notifications',
           isPrivate: false,
           createdBy: user.uid,
           createdAt: serverTimestamp()
@@ -836,7 +836,7 @@ function SlackDashboard({ user, logout }) {
         iconText: name.substring(0, 2).toUpperCase(),
         channels: [
           { id: 'general', name: 'general', desc: 'Company-wide announcements and work-based chat', isPrivate: false },
-          { id: 'random', name: 'random', desc: 'Non-work banter and watercooler chat', isPrivate: false }
+          { id: 'announcement', name: 'announcement', desc: 'Official workspace announcements and notifications', isPrivate: false }
         ],
         members: [user.uid],
         dms: []

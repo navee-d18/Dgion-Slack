@@ -97,7 +97,7 @@ const renderFormattedContent = (content) => {
   // 5. Link: [label](url)
   html = html.replace(/\[(.*?)\]\((https?:\/\/.*?|mailto:.*?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-[#1164A3] hover:underline font-bold font-sans">$1</a>');
 
-  return <span dangerouslySetInnerHTML={{ __html: html }} className="break-words whitespace-pre-wrap block" />;
+  return <span dangerouslySetInnerHTML={{ __html: html }} className="break-words whitespace-pre-wrap inline" />;
 };
 
 const FullEmojiPicker = ({ onSelectEmoji, onClose }) => {
@@ -698,7 +698,8 @@ export default function ThreadPanel({
             const currentReplyDate = getMessageDate(reply);
             const prevReplyDate = prevReply ? getMessageDate(prevReply) : null;
             const isNewDay = !prevReplyDate || !isSameDay(currentReplyDate, prevReplyDate);
-            const isGrouped = prevReply && prevReply.senderId === reply.senderId && !isNewDay;
+            const isCloseTogether = prevReplyDate && (currentReplyDate.getTime() - prevReplyDate.getTime()) < 5 * 60 * 1000;
+            const isGrouped = prevReply && prevReply.senderId === reply.senderId && !isNewDay && isCloseTogether;
 
             const canDeleteReply = reply.senderId === currentUser?.uid || isCreator;
 
@@ -793,7 +794,7 @@ export default function ThreadPanel({
                   {isGrouped ? (
                     <>
                       {/* Grouped message timestamp */}
-                      <div className="w-8 text-[9px] text-[#616061] text-right pr-2 opacity-0 group-hover:opacity-100 shrink-0 select-none pt-0.5 font-medium transition-opacity">
+                      <div className="w-8 text-[9px] text-slate-400 text-right pr-2 shrink-0 select-none pt-0.5 font-semibold">
                         {reply.timestamp.split(' ')[0]}
                       </div>
                       <div className="flex-1 min-w-0 ml-2 text-[13px] text-[#1D1C1D] leading-relaxed flex flex-col">
@@ -833,14 +834,12 @@ export default function ThreadPanel({
                             </div>
                           </div>
                         ) : (
-                          <>
-                            <div className="flex items-baseline gap-1">
-                              {bookmarks[reply.id] && <Bookmark className="w-2.5 h-2.5 text-amber-500 fill-amber-500 shrink-0" />}
-                              {reply.isEdited && <span className="text-[8px] text-slate-400 font-bold">(edited)</span>}
-                            </div>
-                            {renderFormattedContent(reply.content)}
+                          <div className="text-[13px] text-[#1D1C1D] leading-relaxed break-words">
+                            <span className="inline">{renderFormattedContent(reply.content)}</span>
+                            {reply.isEdited && <span className="text-[9px] text-slate-400 font-semibold ml-1.5 select-none inline-block align-baseline" title="This message has been edited">(edited)</span>}
+                            {bookmarks[reply.id] && <Bookmark className="w-3 h-3 text-amber-500 fill-amber-500 shrink-0 ml-1.5 inline-block align-middle animate-in zoom-in-95 duration-100" title="Bookmarked message" />}
                             {reply.file && renderAttachment(reply.file)}
-                          </>
+                          </div>
                         )}
                         {renderReactions(reply)}
                       </div>

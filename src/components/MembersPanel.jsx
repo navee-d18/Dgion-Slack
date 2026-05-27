@@ -39,7 +39,7 @@ export default function MembersPanel({
           {/* Header */}
           <div className="h-[52px] px-4 border-b border-[#E8E8E8] flex items-center justify-between bg-white shrink-0">
             <h2 className="text-[14px] font-extrabold text-[#1D1C1D] tracking-tight">
-              Members ({activeWorkspace.dms.length})
+              Members ({activeWorkspace.members?.length || activeWorkspace.dms.length})
             </h2>
             <button 
               onClick={onClose}
@@ -66,32 +66,45 @@ export default function MembersPanel({
             <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-2 mb-2 select-none">
               In this workspace
             </p>
-            {activeWorkspace.dms.map(member => (
-              <button
-                key={member.id}
-                onClick={() => setSelectedMember(member)}
-                className="w-full flex items-center gap-3 px-2.5 py-1.5 hover:bg-slate-50 border border-transparent rounded-md text-left transition-all duration-100 group"
-              >
-                {/* Perfect Avatar Circle badge */}
-                <div className={`w-8 h-8 rounded-full text-white font-bold flex items-center justify-center text-xs shrink-0 relative ${getAvatarColorClass(member.name)}`}>
-                  {getInitials(member.name)}
-                  
-                  {/* Miniature Presence indicators */}
-                  <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white shrink-0 ${
-                    member.status === 'online' ? 'bg-[#2BAC76]' : 'bg-slate-300'
-                  }`} />
-                </div>
+            {activeWorkspace.dms.map(member => {
+              const isThisMemberCreator = activeWorkspace.createdBy === member.id;
+              const displayRole = isThisMemberCreator ? 'Workspace Owner' : 'Workspace Member';
+              const emailText = member.email || `${member.id}@acme-corp.com`;
 
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold text-[#1D1C1D] truncate group-hover:text-[#1164A3] transition-colors">
-                    {member.name}
-                  </p>
-                  <p className="text-xs text-[#616061] truncate font-normal">
-                    {member.role || 'Workspace Member'}
-                  </p>
-                </div>
-              </button>
-            ))}
+              return (
+                <button
+                  key={member.id}
+                  onClick={() => setSelectedMember(member)}
+                  className="w-full flex items-center gap-3 px-2.5 py-2 hover:bg-slate-50 border border-transparent rounded-md text-left transition-all duration-100 group"
+                >
+                  {/* Perfect Avatar Circle badge */}
+                  <div className={`w-9 h-9 rounded-full text-white font-bold flex items-center justify-center text-xs shrink-0 relative ${getAvatarColorClass(member.name)}`}>
+                    {getInitials(member.name)}
+                    
+                    {/* Miniature Presence indicators */}
+                    <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white shrink-0 ${
+                      member.status === 'online' ? 'bg-[#2BAC76]' : 'bg-slate-300'
+                    }`} />
+                  </div>
+
+                  <div className="min-w-0 flex-1 font-sans">
+                    <div className="flex items-baseline justify-between gap-1.5">
+                      <p className="text-sm font-bold text-[#1D1C1D] truncate group-hover:text-[#1164A3] transition-colors">
+                        {member.name}
+                      </p>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-extrabold tracking-tight shrink-0 ${
+                        isThisMemberCreator ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-slate-100 text-slate-500 border border-slate-200'
+                      }`}>
+                        {isThisMemberCreator ? 'Owner' : 'Member'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#616061] truncate font-normal mt-0.5">
+                      {emailText}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </>
       ) : (
@@ -130,8 +143,8 @@ export default function MembersPanel({
               <h3 className="text-[17px] font-extrabold text-[#1D1C1D] leading-tight tracking-tight">
                 {selectedMember.name}
               </h3>
-              <p className="text-sm text-[#616061] mt-1 font-medium">
-                {selectedMember.role || 'Workspace Member'}
+              <p className="text-sm text-[#616061] mt-1 font-semibold">
+                {activeWorkspace.createdBy === selectedMember.id ? 'Workspace Owner' : 'Workspace Member'}
               </p>
             </div>
 
@@ -155,7 +168,7 @@ export default function MembersPanel({
                 </p>
                 <div className="flex items-center gap-2 text-sm text-[#1D1C1D]">
                   <Briefcase className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span className="font-semibold text-slate-700">{selectedMember.role || 'No title set'}</span>
+                  <span className="font-semibold text-slate-700">{activeWorkspace.createdBy === selectedMember.id ? 'Workspace Owner' : 'Workspace Member'}</span>
                 </div>
               </div>
 

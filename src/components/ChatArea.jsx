@@ -98,7 +98,7 @@ const renderFormattedContent = (content) => {
   // 5. Link: [label](url)
   html = html.replace(/\[(.*?)\]\((https?:\/\/.*?|mailto:.*?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-[#1164A3] hover:underline font-bold font-sans">$1</a>');
 
-  return <span dangerouslySetInnerHTML={{ __html: html }} className="break-words whitespace-pre-wrap block" />;
+  return <span dangerouslySetInnerHTML={{ __html: html }} className="break-words whitespace-pre-wrap inline" />;
 };
 
 const FullEmojiPicker = ({ onSelectEmoji, onClose }) => {
@@ -761,13 +761,16 @@ export default function ChatArea({
 
           <button
             onClick={onToggleRightPanel}
-            className={`p-2 rounded-md hover:bg-slate-100 text-slate-500 hover:text-slate-800 shrink-0 transition-colors ${
-              rightPanelOpen ? 'bg-slate-100 text-[#1164A3] hover:text-[#1164A3]' : ''
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-slate-100 text-slate-500 hover:text-slate-800 shrink-0 transition-colors border border-transparent active:scale-[0.97] transition-all font-sans ${
+              rightPanelOpen ? 'bg-slate-100 text-[#1164A3] hover:text-[#1164A3] border-[#E8E8E8] shadow-sm font-extrabold' : 'font-bold'
             }`}
             aria-label="Toggle members list"
             title="Workspace Members"
           >
-            <Users className="w-4 h-4" />
+            <Users className="w-4 h-4 shrink-0" />
+            <span className="text-xs leading-none">
+              {activeWorkspace?.members?.length || 0}
+            </span>
           </button>
         </div>
       </header>
@@ -805,8 +808,9 @@ export default function ChatArea({
               const prevDate = prevMsg ? getMessageDate(prevMsg) : null;
               const isNewDay = !prevDate || !isSameDay(currentDate, prevDate);
 
-              // Group messages only if same sender AND same calendar day!
-              const isGrouped = prevMsg && prevMsg.senderId === msg.senderId && !isNewDay;
+              // Group messages only if same sender AND same calendar day AND within 5 minutes!
+              const isCloseTogether = prevDate && (currentDate.getTime() - prevDate.getTime()) < 5 * 60 * 1000;
+              const isGrouped = prevMsg && prevMsg.senderId === msg.senderId && !isNewDay && isCloseTogether;
               const isHighlighted = highlightedMessageId === msg.id;
 
               // Sender of this message is current user OR current user is workspace creator
@@ -952,7 +956,7 @@ export default function ChatArea({
                       /* Grouped message layout - EXACT LEFT TEXT ALIGNMENT at 48px */
                       <>
                         {/* Timestamp column */}
-                        <div className="w-9 text-[10px] text-[#616061] text-right pr-2 opacity-0 group-hover:opacity-100 shrink-0 select-none pt-0.5 font-medium transition-opacity duration-75">
+                        <div className="w-9 text-[10px] text-slate-400 text-right pr-2 shrink-0 select-none pt-0.5 font-semibold">
                           {msg.timestamp.split(' ')[0] || msg.timestamp}
                         </div>
                         {/* Text aligns with standard message text column (exactly 12px margin) */}
@@ -996,14 +1000,12 @@ export default function ChatArea({
                               </div>
                             </div>
                           ) : (
-                            <>
-                              <div className="flex items-baseline gap-1.5 mb-0.5">
-                                {bookmarks[msg.id] && <Bookmark className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" title="Bookmarked message" />}
-                                {msg.isEdited && <span className="text-[9px] text-slate-400 font-bold hover:underline cursor-help select-none" title="This message has been edited">(edited)</span>}
-                              </div>
-                              {renderFormattedContent(msg.content)}
+                            <div className="text-[15px] text-[#1D1C1D] leading-relaxed break-words">
+                              <span className="inline">{renderFormattedContent(msg.content)}</span>
+                              {msg.isEdited && <span className="text-[10px] text-slate-400 font-semibold ml-1.5 select-none inline-block align-baseline" title="This message has been edited">(edited)</span>}
+                              {bookmarks[msg.id] && <Bookmark className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0 ml-1.5 inline-block align-middle animate-in zoom-in-95 duration-100" title="Bookmarked message" />}
                               {msg.file && renderAttachment(msg.file)}
-                            </>
+                            </div>
                           )}
                           {renderReactions(msg)}
                           {renderThreadIndicator(msg)}
