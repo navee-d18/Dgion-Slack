@@ -3,7 +3,7 @@ import {
   Hash, Lock, Search, Users, Menu, Send, Bold, Italic, 
   Strikethrough, Code, Link, Paperclip, Smile, HelpCircle, 
   MoreHorizontal, MessageSquare, Bookmark, SmilePlus, Loader2, Settings, Briefcase,
-  X, FileText, Trash2, Edit, Bell, BellOff, Pin
+  X, FileText, Trash2, Edit, Bell, BellOff, Pin, Mic
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -210,6 +210,155 @@ const FullEmojiPicker = ({ onSelectEmoji, onClose }) => {
 
 import { emojiCategories, searchEmojis } from '../utils/emojiData';
 
+const VoiceNotePlayer = ({ file, messageId, activeAudioId, setActiveAudioId }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  
+  const audioRef = useRef(null);
+
+  useEffect(() => {
+    const audio = new Audio(file.url);
+    audioRef.current = audio;
+
+    const handleLoadedMetadata = () => {
+      setDuration(audio.duration || 0);
+    };
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime || 0);
+    };
+
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    };
+
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('ended', handleEnded);
+
+    if (audio.duration) {
+      setDuration(audio.duration);
+    }
+
+    return () => {
+      audio.pause();
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('ended', handleEnded);
+    };
+  }, [file.url]);
+
+  // Synchronize playing states globally: pause others when another voice note plays
+  useEffect(() => {
+    const handleOtherPlay = (e) => {
+      if (e.detail.messageId !== messageId && isPlaying) {
+        audioRef.current?.pause();
+        setIsPlaying(false);
+      }
+    };
+    window.addEventListener('voice-note-played', handleOtherPlay);
+    return () => {
+      window.removeEventListener('voice-note-played', handleOtherPlay);
+    };
+  }, [messageId, isPlaying]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackRate;
+    }
+  }, [playbackRate]);
+
+  const handlePlayPause = () => {
+    if (!audioRef.current) return;
+
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      // Pause other voice notes globally first
+      window.dispatchEvent(new CustomEvent('voice-note-played', { detail: { messageId } }));
+      if (setActiveAudioId) {
+        setActiveAudioId(messageId);
+      }
+      audioRef.current.play().catch(err => {
+        console.warn('Audio playback failure:', err);
+      });
+      setIsPlaying(true);
+    }
+  };
+
+  const handleSeek = (e) => {
+    if (!audioRef.current) return;
+    const time = parseFloat(e.target.value);
+    audioRef.current.currentTime = time;
+    setCurrentTime(time);
+  };
+
+  const handleSpeedToggle = () => {
+    setPlaybackRate(prev => {
+      if (prev === 1) return 1.5;
+      if (prev === 1.5) return 2;
+      return 1;
+    });
+  };
+
+  const formatTime = (time) => {
+    if (isNaN(time) || !isFinite(time)) return '0:00';
+    const mins = Math.floor(time / 60);
+    const secs = Math.floor(time % 60);
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+  };
+
+  return (
+    <div className="mt-2 p-3 bg-slate-50 border border-slate-200 hover:bg-slate-100/50 rounded-xl max-w-xs sm:max-w-sm transition-all duration-100 flex items-center justify-between gap-3 font-sans select-none animate-in slide-in-from-top-1 shadow-sm border-l-4 border-l-[#1164A3]">
+      <button
+        type="button"
+        onClick={handlePlayPause}
+        className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#1164A3] text-white flex items-center justify-center hover:bg-[#1164A3]/90 transition-all hover:scale-105 active:scale-95 shrink-0 shadow-sm cursor-pointer"
+        aria-label={isPlaying ? 'Pause voice note' : 'Play voice note'}
+      >
+        {isPlaying ? (
+          <span className="text-[12px] sm:text-[13px]">⏸️</span>
+        ) : (
+          <span className="text-[12px] sm:text-[13px] ml-0.5">▶️</span>
+        )}
+      </button>
+
+      <div className="flex-1 min-w-0 flex flex-col gap-1">
+        <input
+          type="range"
+          min="0"
+          max={duration || 100}
+          value={currentTime}
+          onChange={handleSeek}
+          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#1164A3] focus:outline-none focus:ring-0"
+          style={{
+            background: `linear-gradient(to right, #1164A3 0%, #1164A3 ${(currentTime / (duration || 1)) * 100}%, #cbd5e1 ${(currentTime / (duration || 1)) * 100}%, #cbd5e1 100%)`
+          }}
+        />
+        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold select-none leading-none mt-0.5">
+          <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
+          <span className="text-slate-400/80 uppercase tracking-widest text-[8px] flex items-center gap-0.5">
+            <span>🎤</span> Voice Note
+          </span>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={handleSpeedToggle}
+        className="px-2.5 py-1.5 sm:px-3 sm:py-2 text-[10px] sm:text-[11px] font-black tracking-tight text-[#1164A3] hover:text-white bg-white hover:bg-[#1164A3] border border-slate-200 hover:border-[#1164A3] rounded-md transition-all shrink-0 shadow-sm cursor-pointer select-none"
+        title="Change playback speed"
+      >
+        {playbackRate}x
+      </button>
+    </div>
+  );
+};
+
 export default function ChatArea({
   activeWorkspace,
   activeDestinationId,
@@ -285,6 +434,20 @@ export default function ChatArea({
   const [deleteTargetMessageId, setDeleteTargetMessageId] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [activeMenuMessageId, setActiveMenuMessageId] = useState(null);
+  
+  // Voice note / audio recording states
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [isRecordingPaused, setIsRecordingPaused] = useState(false);
+  const [micError, setMicError] = useState('');
+  const [activeAudioId, setActiveAudioId] = useState(null);
+  const [recordedBlob, setRecordedBlob] = useState(null);
+
+  // Voice note / audio recording refs
+  const mediaRecorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const timerIntervalRef = useRef(null);
+  const chunksRef = useRef([]);
   
   // Custom rich-interaction states
   const [activeReactionPickerMessageId, setActiveReactionPickerMessageId] = useState(null);
@@ -651,6 +814,162 @@ export default function ChatArea({
     }, 50);
   };
 
+  // Cleanup recording stream and timers when unmounting
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
+
+  const handleStartRecording = async () => {
+    setMicError('');
+    chunksRef.current = [];
+    setRecordedBlob(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      
+      const options = { audioBitsPerSecond: 16000 };
+      let recorder;
+      try {
+        recorder = new MediaRecorder(stream, options);
+      } catch (e) {
+        console.warn('MediaRecorder options failure, falling back to default:', e);
+        recorder = new MediaRecorder(stream);
+      }
+
+      mediaRecorderRef.current = recorder;
+      mediaRecorderRef.current.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorderRef.current.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        setRecordedBlob(blob);
+      };
+
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+      setIsRecordingPaused(false);
+      setRecordingDuration(0);
+
+      // Start countdown / up timer
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = setInterval(() => {
+        setRecordingDuration(prev => {
+          if (prev >= 179) { // 3 minutes limit (180 seconds)
+            clearInterval(timerIntervalRef.current);
+            handleStopRecordingForced();
+            return 180;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+
+    } catch (err) {
+      console.warn('Microphone permission blocked or failure:', err);
+      setMicError('Microphone access denied. Enable permissions to record voice notes.');
+    }
+  };
+
+  const handlePauseRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.pause();
+      setIsRecordingPaused(true);
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    }
+  };
+
+  const handleResumeRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
+      mediaRecorderRef.current.resume();
+      setIsRecordingPaused(false);
+      
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = setInterval(() => {
+        setRecordingDuration(prev => {
+          if (prev >= 179) {
+            clearInterval(timerIntervalRef.current);
+            handleStopRecordingForced();
+            return 180;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    }
+  };
+
+  const handleCancelRecording = () => {
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.onstop = null; // discard recording chunks
+      if (mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    
+    setIsRecording(false);
+    setIsRecordingPaused(false);
+    setRecordingDuration(0);
+    setRecordedBlob(null);
+    chunksRef.current = [];
+  };
+
+  const handleStopRecordingForced = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    setIsRecordingPaused(false);
+  };
+
+  const handleSendVoiceNote = async () => {
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    
+    const sendBlob = async (blob) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(blob);
+      reader.onloadend = () => {
+        const base64DataUri = reader.result;
+        onSendMessage('', {
+          name: 'Voice Note.webm',
+          size: blob.size,
+          type: blob.type || 'audio/webm',
+          url: base64DataUri
+        });
+        
+        setIsRecording(false);
+        setIsRecordingPaused(false);
+        setRecordingDuration(0);
+        setRecordedBlob(null);
+        chunksRef.current = [];
+      };
+    };
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: mediaRecorderRef.current.mimeType || 'audio/webm' });
+        await sendBlob(blob);
+      };
+      mediaRecorderRef.current.stop();
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    } else if (recordedBlob) {
+      await sendBlob(recordedBlob);
+    }
+  };
+
   const handleSend = () => {
     if (!inputText.trim() && !attachment) return;
     onSendMessage(inputText, attachment);
@@ -701,8 +1020,20 @@ export default function ChatArea({
     }
   };
 
-  const renderAttachment = (file) => {
+  const renderAttachment = (file, messageId) => {
     if (!file || !file.url) return null;
+
+    const isAudio = file.type?.startsWith('audio/') || file.name?.endsWith('.webm');
+    if (isAudio) {
+      return (
+        <VoiceNotePlayer 
+          file={file} 
+          messageId={messageId} 
+          activeAudioId={activeAudioId} 
+          setActiveAudioId={setActiveAudioId} 
+        />
+      );
+    }
 
     const isImage = file.type.startsWith('image/');
     
@@ -1366,7 +1697,7 @@ export default function ChatArea({
                               <span className="inline">{renderFormattedContent(msg.content, activeWorkspace?.allWorkspaceMembers)}</span>
                               {msg.isEdited && <span className="text-[10px] text-slate-400 font-semibold ml-1.5 select-none inline-block align-baseline" title="This message has been edited">(edited)</span>}
                               {bookmarks[msg.id] && <Bookmark className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0 ml-1.5 inline-block align-middle animate-in zoom-in-95 duration-100" title="Bookmarked message" />}
-                              {msg.file && renderAttachment(msg.file)}
+                              {msg.file && renderAttachment(msg.file, msg.id)}
                             </div>
                           )}
                           {renderReactions(msg)}
@@ -1440,7 +1771,7 @@ export default function ChatArea({
                           ) : (
                             <div className="text-[15px] text-[#1D1C1D] leading-relaxed">
                               {renderFormattedContent(msg.content, activeWorkspace?.allWorkspaceMembers)}
-                              {msg.file && renderAttachment(msg.file)}
+                              {msg.file && renderAttachment(msg.file, msg.id)}
                             </div>
                           )}
                           {renderReactions(msg)}
@@ -1517,204 +1848,283 @@ export default function ChatArea({
             </div>
           )}
 
-          <div className="border border-[#E8E8E8] focus-within:ring-1 focus-within:ring-[#1164A3] focus-within:border-[#1164A3] rounded-xl flex flex-col overflow-hidden bg-white shadow-sm transition-all duration-100 bg-white">
-          
-          {/* Removable staged attachment pill */}
-          {attachment && (
-            <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 animate-in slide-in-from-top-1 duration-100">
-              <div className="flex items-center gap-2 min-w-0">
-                <Paperclip className="w-3.5 h-3.5 text-[#1164A3] shrink-0" />
-                <span className="text-xs font-bold text-slate-700 truncate">{attachment.name}</span>
-                <span className="text-[10px] text-slate-500 font-medium">({(attachment.size / 1024).toFixed(1)} KB)</span>
+        {micError && (
+          <div className="flex items-center justify-between px-4 py-2 bg-red-50 border border-red-200 rounded-lg mb-2 animate-in slide-in-from-bottom-2 duration-100 font-sans mx-1">
+            <span className="text-xs font-bold text-red-600 flex items-center gap-1.5 select-none">
+              <span>⚠️</span>
+              <span>{micError}</span>
+            </span>
+            <button 
+              type="button"
+              onClick={() => setMicError('')}
+              className="p-1 hover:bg-red-100 rounded-full text-red-400 hover:text-red-600 transition-colors cursor-pointer"
+              title="Dismiss warning"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
+        <div className="border border-[#E8E8E8] focus-within:ring-1 focus-within:ring-[#1164A3] focus-within:border-[#1164A3] rounded-xl flex flex-col overflow-hidden bg-white shadow-sm transition-all duration-100 bg-white">
+          {isRecording ? (
+            <div className="flex flex-col p-4 bg-slate-50 font-sans select-none animate-in slide-in-from-bottom-2 duration-200">
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="relative flex h-3 w-3 shrink-0">
+                    {!recordedBlob && !isRecordingPaused && (
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    )}
+                    <span className={`relative inline-flex rounded-full h-3 w-3 ${recordedBlob ? 'bg-slate-400' : 'bg-red-500'}`}></span>
+                  </span>
+                  <span className="text-sm font-bold text-[#1D1C1D] flex items-center gap-1.5">
+                    <span>
+                      {recordedBlob 
+                        ? 'Recording limit reached' 
+                        : isRecordingPaused 
+                          ? 'Recording paused' 
+                          : 'Recording voice note...'}
+                    </span>
+                    <span className={`font-mono font-extrabold text-[15px] ${recordedBlob ? 'text-slate-600' : 'text-red-600'}`}>
+                      {Math.floor(recordingDuration / 60)}:{String(recordingDuration % 60).padStart(2, '0')}
+                    </span>
+                    <span className="text-[10.5px] text-slate-400 font-bold tracking-tight">/ 3:00</span>
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!recordedBlob && (
+                    <button
+                      type="button"
+                      onClick={isRecordingPaused ? handleResumeRecording : handlePauseRecording}
+                      className="px-3.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-sm min-w-[76px] text-center animate-in fade-in zoom-in-95 duration-100"
+                    >
+                      {isRecordingPaused ? 'Resume' : 'Pause'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleCancelRecording}
+                    className="px-3.5 py-1.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 text-xs font-bold rounded-lg transition-colors cursor-pointer shadow-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSendVoiceNote}
+                    className="px-4 py-1.5 bg-[#1164A3] hover:bg-[#1164A3]/90 text-white text-xs font-bold rounded-lg transition-all hover:scale-[1.02] cursor-pointer shadow-sm"
+                  >
+                    Send
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setAttachment(null)}
-                className="p-1 hover:bg-slate-200 rounded text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-                title="Remove attachment"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
             </div>
-          )}
+          ) : (
+            <>
+              {/* Removable staged attachment pill */}
+              {attachment && (
+                <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 animate-in slide-in-from-top-1 duration-100">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Paperclip className="w-3.5 h-3.5 text-[#1164A3] shrink-0" />
+                    <span className="text-xs font-bold text-slate-700 truncate">{attachment.name}</span>
+                    <span className="text-[10px] text-slate-500 font-medium">({(attachment.size / 1024).toFixed(1)} KB)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAttachment(null)}
+                    className="p-1 hover:bg-slate-200 rounded text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                    title="Remove attachment"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
 
-          <textarea
-            ref={textareaRef}
-            value={inputText}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            placeholder={`Message ${isDestinationDm ? destinationName : `#${destinationName}`}`}
-            className="w-full resize-none border-none focus:outline-none p-3.5 pb-2 text-[15px] text-[#1D1C1D] placeholder-slate-400 min-h-[44px] max-h-[180px] font-normal font-sans bg-transparent"
-            rows={1}
-            aria-label="Message text"
-          />
+              <textarea
+                ref={textareaRef}
+                value={inputText}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                placeholder={`Message ${isDestinationDm ? destinationName : `#${destinationName}`}`}
+                className="w-full resize-none border-none focus:outline-none p-3.5 pb-2 text-[15px] text-[#1D1C1D] placeholder-slate-400 min-h-[44px] max-h-[180px] font-normal font-sans bg-transparent"
+                rows={1}
+                aria-label="Message text"
+              />
 
-          {/* Inline Link Builder Popup panel */}
-          {showLinkModal && (
-            <div className="px-4 py-3 bg-slate-50 border-t border-[#E8E8E8] flex flex-col gap-2.5 animate-in fade-in duration-100 font-sans">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Insert Markdown Link</span>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Link Label (e.g. Google)"
-                  value={linkLabel}
-                  onChange={(e) => setLinkLabel(e.target.value)}
-                  className="flex-1 px-2.5 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#1164A3] focus:border-[#1164A3] font-semibold bg-white text-slate-700"
-                />
-                <input
-                  type="text"
-                  placeholder="URL (https://...)"
-                  value={linkUrl}
-                  onChange={(e) => setLinkUrl(e.target.value)}
-                  className="flex-[2] px-2.5 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#1164A3] focus:border-[#1164A3] font-semibold bg-white text-slate-700"
-                />
-              </div>
-              <div className="flex justify-end gap-1.5 pt-0.5">
-                <button
-                  type="button"
-                  onClick={() => { setShowLinkModal(false); setLinkUrl(''); setLinkLabel(''); }}
-                  className="px-3 py-1 border border-slate-300 hover:bg-slate-200 rounded-lg text-[11px] font-bold text-slate-600 transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={!linkUrl.trim()}
-                  onClick={() => {
-                    if (!linkUrl.trim()) return;
-                    const label = linkLabel.trim() || linkUrl.trim();
-                    let url = linkUrl.trim();
-                    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                      url = 'https://' + url;
-                    }
+              {/* Inline Link Builder Popup panel */}
+              {showLinkModal && (
+                <div className="px-4 py-3 bg-slate-50 border-t border-[#E8E8E8] flex flex-col gap-2.5 animate-in fade-in duration-100 font-sans">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Insert Markdown Link</span>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Link Label (e.g. Google)"
+                      value={linkLabel}
+                      onChange={(e) => setLinkLabel(e.target.value)}
+                      className="flex-1 px-2.5 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#1164A3] focus:border-[#1164A3] font-semibold bg-white text-slate-700"
+                    />
+                    <input
+                      type="text"
+                      placeholder="URL (https://...)"
+                      value={linkUrl}
+                      onChange={(e) => setLinkUrl(e.target.value)}
+                      className="flex-[2] px-2.5 py-1 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#1164A3] focus:border-[#1164A3] font-semibold bg-white text-slate-700"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-1.5 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => { setShowLinkModal(false); setLinkUrl(''); setLinkLabel(''); }}
+                      className="px-3 py-1 border border-slate-300 hover:bg-slate-200 rounded-lg text-[11px] font-bold text-slate-600 transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!linkUrl.trim()}
+                      onClick={() => {
+                        if (!linkUrl.trim()) return;
+                        const label = linkLabel.trim() || linkUrl.trim();
+                        let url = linkUrl.trim();
+                        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                          url = 'https://' + url;
+                        }
+                        const textarea = textareaRef.current;
+                        const start = textarea.selectionStart;
+                        const end = textarea.selectionEnd;
+                        const text = textarea.value;
+                        const markdownLink = `[${label}](${url})`;
+                        const newText = text.substring(0, start) + markdownLink + text.substring(end);
+                        setInputText(newText);
+                        setShowLinkModal(false);
+                        setLinkUrl('');
+                        setLinkLabel('');
+                        setTimeout(() => textarea.focus(), 50);
+                      }}
+                      className="px-3 py-1 bg-[#1164A3] hover:bg-[#1164A3]/90 text-white rounded-lg text-[11px] font-bold transition-all disabled:opacity-50 cursor-pointer"
+                    >
+                      Add Link
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Curated emoji picker popover */}
+              {showEmojiPicker && (
+                <FullEmojiPicker
+                  onSelectEmoji={(emoji) => {
                     const textarea = textareaRef.current;
+                    if (!textarea) {
+                      setInputText(prev => prev + emoji);
+                      return;
+                    }
                     const start = textarea.selectionStart;
                     const end = textarea.selectionEnd;
                     const text = textarea.value;
-                    const markdownLink = `[${label}](${url})`;
-                    const newText = text.substring(0, start) + markdownLink + text.substring(end);
+                    const newText = text.substring(0, start) + emoji + text.substring(end);
                     setInputText(newText);
-                    setShowLinkModal(false);
-                    setLinkUrl('');
-                    setLinkLabel('');
                     setTimeout(() => textarea.focus(), 50);
                   }}
-                  className="px-3 py-1 bg-[#1164A3] hover:bg-[#1164A3]/90 text-white rounded-lg text-[11px] font-bold transition-all disabled:opacity-50 cursor-pointer"
+                  onClose={() => setShowEmojiPicker(false)}
+                />
+              )}
+
+              {/* Polished Bottom Toolbar */}
+              <div className="px-3 py-2 bg-slate-50 border-t border-[#E8E8E8] flex items-center justify-between select-none">
+                {/* Hidden native file uploader input */}
+                <input 
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
+                  className="hidden"
+                />
+
+                {/* Toolbar Icons */}
+                <div className="flex items-center gap-1.5 text-slate-500">
+                  <button 
+                    type="button" 
+                    onClick={() => insertMarkdown('bold')}
+                    className="p-1 hover:bg-slate-200 rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" 
+                    title="Bold (Ctrl+B)"
+                  >
+                    <Bold className="w-4 h-4" />
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => insertMarkdown('italic')}
+                    className="p-1 hover:bg-slate-200 rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" 
+                    title="Italic (Ctrl+I)"
+                  >
+                    <Italic className="w-4 h-4" />
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => insertMarkdown('strike')}
+                    className="p-1 hover:bg-slate-200 rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" 
+                    title="Strikethrough"
+                  >
+                    <Strikethrough className="w-4 h-4" />
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => insertMarkdown('code')}
+                    className="p-1 hover:bg-slate-200 rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" 
+                    title="Code snippet"
+                  >
+                    <Code className="w-4 h-4" />
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => { setShowLinkModal(!showLinkModal); setShowEmojiPicker(false); }}
+                    className={`p-1 hover:bg-slate-200 rounded transition-colors cursor-pointer ${showLinkModal ? 'bg-slate-200 text-[#1164A3]' : 'text-slate-600 hover:text-slate-900'}`} 
+                    title="Add link"
+                  >
+                    <Link className="w-4 h-4" />
+                  </button>
+                  <div className="w-[1px] h-4 bg-slate-200 mx-1" />
+                  <button 
+                    type="button" 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-1 hover:bg-slate-200 rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" 
+                    title="Attach file"
+                  >
+                    <Paperclip className="w-4 h-4" />
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowLinkModal(false); }}
+                    className={`p-1 hover:bg-slate-200 rounded transition-colors cursor-pointer ${showEmojiPicker ? 'bg-slate-200 text-[#1164A3]' : 'text-slate-600 hover:text-slate-900'}`} 
+                    title="Add emoji"
+                  >
+                    <Smile className="w-4 h-4" />
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={handleStartRecording}
+                    className="p-1 hover:bg-slate-200 rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" 
+                    title="Record voice note"
+                  >
+                    <Mic className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Blue Send Button */}
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={!inputText.trim() && !attachment}
+                  className={`p-1.5 rounded-lg flex items-center justify-center transition-all ${
+                    inputText.trim() || attachment
+                      ? 'bg-[#1164A3] hover:bg-[#1164A3]/90 text-white shadow-sm scale-100 hover:scale-105 active:scale-[0.95] cursor-pointer' 
+                      : 'text-slate-300 cursor-not-allowed bg-transparent'
+                  }`}
+                  title="Send message"
+                  aria-label="Send message"
                 >
-                  Add Link
+                  <Send className="w-4 h-4" />
                 </button>
               </div>
-            </div>
+            </>
           )}
-
-          {/* Curated emoji picker popover */}
-          {showEmojiPicker && (
-            <FullEmojiPicker
-              onSelectEmoji={(emoji) => {
-                const textarea = textareaRef.current;
-                if (!textarea) {
-                  setInputText(prev => prev + emoji);
-                  return;
-                }
-                const start = textarea.selectionStart;
-                const end = textarea.selectionEnd;
-                const text = textarea.value;
-                const newText = text.substring(0, start) + emoji + text.substring(end);
-                setInputText(newText);
-                setTimeout(() => textarea.focus(), 50);
-              }}
-              onClose={() => setShowEmojiPicker(false)}
-            />
-          )}
-
-          {/* Polished Bottom Toolbar */}
-          <div className="px-3 py-2 bg-slate-50 border-t border-[#E8E8E8] flex items-center justify-between select-none">
-            {/* Hidden native file uploader input */}
-            <input 
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileChange}
-              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt"
-              className="hidden"
-            />
-
-            {/* Toolbar Icons */}
-            <div className="flex items-center gap-1.5 text-slate-500">
-              <button 
-                type="button" 
-                onClick={() => insertMarkdown('bold')}
-                className="p-1 hover:bg-slate-200 rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" 
-                title="Bold (Ctrl+B)"
-              >
-                <Bold className="w-4 h-4" />
-              </button>
-              <button 
-                type="button" 
-                onClick={() => insertMarkdown('italic')}
-                className="p-1 hover:bg-slate-200 rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" 
-                title="Italic (Ctrl+I)"
-              >
-                <Italic className="w-4 h-4" />
-              </button>
-              <button 
-                type="button" 
-                onClick={() => insertMarkdown('strike')}
-                className="p-1 hover:bg-slate-200 rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" 
-                title="Strikethrough"
-              >
-                <Strikethrough className="w-4 h-4" />
-              </button>
-              <button 
-                type="button" 
-                onClick={() => insertMarkdown('code')}
-                className="p-1 hover:bg-slate-200 rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" 
-                title="Code snippet"
-              >
-                <Code className="w-4 h-4" />
-              </button>
-              <button 
-                type="button" 
-                onClick={() => { setShowLinkModal(!showLinkModal); setShowEmojiPicker(false); }}
-                className={`p-1 hover:bg-slate-200 rounded transition-colors cursor-pointer ${showLinkModal ? 'bg-slate-200 text-[#1164A3]' : 'text-slate-600 hover:text-slate-900'}`} 
-                title="Add link"
-              >
-                <Link className="w-4 h-4" />
-              </button>
-              <div className="w-[1px] h-4 bg-slate-200 mx-1" />
-              <button 
-                type="button" 
-                onClick={() => fileInputRef.current?.click()}
-                className="p-1 hover:bg-slate-200 rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer" 
-                title="Attach file"
-              >
-                <Paperclip className="w-4 h-4" />
-              </button>
-              <button 
-                type="button" 
-                onClick={() => { setShowEmojiPicker(!showEmojiPicker); setShowLinkModal(false); }}
-                className={`p-1 hover:bg-slate-200 rounded transition-colors cursor-pointer ${showEmojiPicker ? 'bg-slate-200 text-[#1164A3]' : 'text-slate-600 hover:text-slate-900'}`} 
-                title="Add emoji"
-              >
-                <Smile className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Blue Send Button */}
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={!inputText.trim() && !attachment}
-              className={`p-1.5 rounded-lg flex items-center justify-center transition-all ${
-                inputText.trim() || attachment
-                  ? 'bg-[#1164A3] hover:bg-[#1164A3]/90 text-white shadow-sm scale-100 hover:scale-105 active:scale-[0.95] cursor-pointer' 
-                  : 'text-slate-300 cursor-not-allowed bg-transparent'
-              }`}
-              title="Send message"
-              aria-label="Send message"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </div>
         </div>
       </div>
         

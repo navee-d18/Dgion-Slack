@@ -201,6 +201,155 @@ const SearchIcon = ({ className }) => (
   </svg>
 );
 
+const VoiceNotePlayer = ({ file, messageId, activeAudioId, setActiveAudioId }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  
+  const audioRef = useRef(null);
+
+  useEffect(() => {
+    const audio = new Audio(file.url);
+    audioRef.current = audio;
+
+    const handleLoadedMetadata = () => {
+      setDuration(audio.duration || 0);
+    };
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime || 0);
+    };
+
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    };
+
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('ended', handleEnded);
+
+    if (audio.duration) {
+      setDuration(audio.duration);
+    }
+
+    return () => {
+      audio.pause();
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('ended', handleEnded);
+    };
+  }, [file.url]);
+
+  // Synchronize playing states globally: pause others when another voice note plays
+  useEffect(() => {
+    const handleOtherPlay = (e) => {
+      if (e.detail.messageId !== messageId && isPlaying) {
+        audioRef.current?.pause();
+        setIsPlaying(false);
+      }
+    };
+    window.addEventListener('voice-note-played', handleOtherPlay);
+    return () => {
+      window.removeEventListener('voice-note-played', handleOtherPlay);
+    };
+  }, [messageId, isPlaying]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackRate;
+    }
+  }, [playbackRate]);
+
+  const handlePlayPause = () => {
+    if (!audioRef.current) return;
+
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      // Pause other voice notes globally first
+      window.dispatchEvent(new CustomEvent('voice-note-played', { detail: { messageId } }));
+      if (setActiveAudioId) {
+        setActiveAudioId(messageId);
+      }
+      audioRef.current.play().catch(err => {
+        console.warn('Audio playback failure:', err);
+      });
+      setIsPlaying(true);
+    }
+  };
+
+  const handleSeek = (e) => {
+    if (!audioRef.current) return;
+    const time = parseFloat(e.target.value);
+    audioRef.current.currentTime = time;
+    setCurrentTime(time);
+  };
+
+  const handleSpeedToggle = () => {
+    setPlaybackRate(prev => {
+      if (prev === 1) return 1.5;
+      if (prev === 1.5) return 2;
+      return 1;
+    });
+  };
+
+  const formatTime = (time) => {
+    if (isNaN(time) || !isFinite(time)) return '0:00';
+    const mins = Math.floor(time / 60);
+    const secs = Math.floor(time % 60);
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+  };
+
+  return (
+    <div className="mt-2 p-3 bg-slate-50 border border-slate-200 hover:bg-slate-100/50 rounded-xl max-w-[240px] transition-all duration-100 flex items-center justify-between gap-3 font-sans select-none animate-in slide-in-from-top-1 shadow-sm border-l-4 border-l-[#1164A3]">
+      <button
+        type="button"
+        onClick={handlePlayPause}
+        className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[#1164A3] text-white flex items-center justify-center hover:bg-[#1164A3]/90 transition-all hover:scale-105 active:scale-95 shrink-0 shadow-sm cursor-pointer"
+        aria-label={isPlaying ? 'Pause voice note' : 'Play voice note'}
+      >
+        {isPlaying ? (
+          <span className="text-[12px] sm:text-[13px]">⏸️</span>
+        ) : (
+          <span className="text-[12px] sm:text-[13px] ml-0.5">▶️</span>
+        )}
+      </button>
+
+      <div className="flex-1 min-w-0 flex flex-col gap-1">
+        <input
+          type="range"
+          min="0"
+          max={duration || 100}
+          value={currentTime}
+          onChange={handleSeek}
+          className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#1164A3] focus:outline-none focus:ring-0"
+          style={{
+            background: `linear-gradient(to right, #1164A3 0%, #1164A3 ${(currentTime / (duration || 1)) * 100}%, #cbd5e1 ${(currentTime / (duration || 1)) * 100}%, #cbd5e1 100%)`
+          }}
+        />
+        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold select-none leading-none mt-0.5">
+          <span>{formatTime(currentTime)} / {formatTime(duration)}</span>
+          <span className="text-slate-400/80 uppercase tracking-widest text-[7.5px] flex items-center gap-0.5">
+            <span>🎤</span> Voice Note
+          </span>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={handleSpeedToggle}
+        className="px-2 py-1 text-[9px] font-black tracking-tight text-[#1164A3] hover:text-white bg-white hover:bg-[#1164A3] border border-slate-200 hover:border-[#1164A3] rounded-md transition-all shrink-0 shadow-sm cursor-pointer select-none"
+        title="Change playback speed"
+      >
+        {playbackRate}x
+      </button>
+    </div>
+  );
+};
+
 export default function ThreadPanel({
   activeWorkspace,
   activeDestinationId,
@@ -220,6 +369,7 @@ export default function ThreadPanel({
   const [linkLabel, setLinkLabel] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [attachment, setAttachment] = useState(null);
+  const [activeAudioId, setActiveAudioId] = useState(null);
 
   // States for Reactions, Editing, and Bookmarks within thread panel
   const [activeReactionPickerMessageId, setActiveReactionPickerMessageId] = useState(null);
@@ -346,8 +496,19 @@ export default function ThreadPanel({
     }
   };
 
-  const renderAttachment = (file) => {
+  const renderAttachment = (file, messageId) => {
     if (!file || !file.url) return null;
+    const isAudio = file.type?.startsWith('audio/') || file.name?.endsWith('.webm');
+    if (isAudio) {
+      return (
+        <VoiceNotePlayer 
+          file={file} 
+          messageId={messageId} 
+          activeAudioId={activeAudioId} 
+          setActiveAudioId={setActiveAudioId} 
+        />
+      );
+    }
     const isImage = file.type.startsWith('image/');
     
     if (isImage) {
@@ -591,7 +752,7 @@ export default function ThreadPanel({
                 ) : (
                   <div className="text-[13px] text-[#1D1C1D] leading-relaxed break-words">
                     {renderFormattedContent(parentMessage.content)}
-                    {parentMessage.file && renderAttachment(parentMessage.file)}
+                    {parentMessage.file && renderAttachment(parentMessage.file, parentMessage.id)}
                   </div>
                 )}
                 
@@ -838,7 +999,7 @@ export default function ThreadPanel({
                             <span className="inline">{renderFormattedContent(reply.content)}</span>
                             {reply.isEdited && <span className="text-[9px] text-slate-400 font-semibold ml-1.5 select-none inline-block align-baseline" title="This message has been edited">(edited)</span>}
                             {bookmarks[reply.id] && <Bookmark className="w-3 h-3 text-amber-500 fill-amber-500 shrink-0 ml-1.5 inline-block align-middle animate-in zoom-in-95 duration-100" title="Bookmarked message" />}
-                            {reply.file && renderAttachment(reply.file)}
+                            {reply.file && renderAttachment(reply.file, reply.id)}
                           </div>
                         )}
                         {renderReactions(reply)}
@@ -900,7 +1061,7 @@ export default function ThreadPanel({
                         ) : (
                           <div className="text-[13px] text-[#1D1C1D] leading-relaxed break-words">
                             {renderFormattedContent(reply.content)}
-                            {reply.file && renderAttachment(reply.file)}
+                            {reply.file && renderAttachment(reply.file, reply.id)}
                           </div>
                         )}
                         {renderReactions(reply)}
