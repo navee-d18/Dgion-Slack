@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import WorkspaceSidebar from './components/WorkspaceSidebar';
 import ChannelNav from './components/ChannelNav';
 import ChatArea from './components/ChatArea';
@@ -52,6 +52,11 @@ function SlackDashboard({ user, logout }) {
   
   const [messages, setMessages] = useState(INITIAL_MESSAGES);
   const [allRegisteredUsers, setAllRegisteredUsers] = useState([]);
+
+  const latestUsersRef = useRef(allRegisteredUsers);
+  useEffect(() => {
+    latestUsersRef.current = allRegisteredUsers;
+  }, [allRegisteredUsers]);
 
   const [workspacesLoading, setWorkspacesLoading] = useState(isConfigured);
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -259,6 +264,184 @@ function SlackDashboard({ user, logout }) {
     });
 
     return () => unsubscribe();
+  }, [user]);
+
+  // ========================================================
+  // 3.5. REAL-TIME OBSERVER: HIERARCHICAL PRESENCE TRACKING (ONLINE/OFFLINE)
+  // ========================================================
+  useEffect(() => {
+    if (!user) return;
+
+    let idleTimeout = null;
+    let heartbeatInterval = null;
+    const IDLE_TIME = 5 * 60 * 1000; // 5 minutes
+    const HEARTBEAT_INTERVAL = 2 * 60 * 1000; // 2 minutes
+
+    // Helper to update database status
+    const updateDbPresence = async (status) => {
+      try {
+        const timestamp = new Date().toISOString();
+        if (isConfigured) {
+          const userDocRef = doc(db, 'users', user.uid);
+          await updateDoc(userDocRef, {
+            presenceStatus: status,
+            onlineStatus: status,
+            lastSeenAt: timestamp
+          });
+        } else {
+          // Emulation LocalStorage fallback
+          const dbUsers = JSON.parse(localStorage.getItem('emulated_users_docs') || '[]');
+          const updated = dbUsers.map(u => 
+            u.uid === user.uid 
+              ? { ...u, presenceStatus: status, onlineStatus: status, lastSeenAt: timestamp } 
+              : u
+          );
+          localStorage.setItem('emulated_users_docs', JSON.stringify(updated));
+          
+          // Force update local states instantly
+          setAllRegisteredUsers(updated.map(u => ({ id: u.uid, ...u })));
+          
+          // Update emulated workspaces to update sidebar in real-time
+          setWorkspaces(prev => prev.map(ws => {
+            if (ws.dms) {
+              const updatedDms = ws.dms.map(d => d.id === user.uid ? { 
+                ...d, 
+                status: status
+              } : d);
+              return { ...ws, dms: updatedDms };
+            }
+            return ws;
+          }));
+
+          // Also update session user status
+          const session = JSON.parse(localStorage.getItem('emulated_session') || '{}');
+          if (session.uid === user.uid) {
+            localStorage.setItem('emulated_session', JSON.stringify({
+              ...session,
+              presenceStatus: status,
+              onlineStatus: status,
+              lastSeenAt: timestamp
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to update presence status in database:', err);
+      }
+    };
+
+    // Helper to report active (typing priority is fully honored here)
+    let lastWriteTime = 0;
+    const reportActive = async (isTyping = false) => {
+      const now = Date.now();
+      
+      // Fetch latest DB status (optimized via latestUsersRef or localStorage in emulation)
+      let currentDbStatus = 'offline';
+      if (isConfigured) {
+        const freshUserDoc = latestUsersRef.current.find(u => u.uid === user.uid || u.id === user.uid);
+        currentDbStatus = freshUserDoc ? (freshUserDoc.presenceStatus || freshUserDoc.onlineStatus || 'offline') : 'offline';
+      } else {
+        const dbUsers = JSON.parse(localStorage.getItem('emulated_users_docs') || '[]');
+        const freshUserDoc = dbUsers.find(u => u.uid === user.uid);
+        currentDbStatus = freshUserDoc ? (freshUserDoc.presenceStatus || freshUserDoc.onlineStatus || 'offline') : 'offline';
+      }
+
+      // Instant online if user started typing OR if current DB status is not online
+      // Heartbeat written every 2 minutes if already online
+      if (currentDbStatus !== 'online' || isTyping || (now - lastWriteTime > HEARTBEAT_INTERVAL)) {
+        lastWriteTime = now;
+        await updateDbPresence('online');
+      }
+
+      // Reset the idle timer
+      resetIdleTimer();
+    };
+
+    // Reset idle timer
+    const resetIdleTimer = () => {
+      if (idleTimeout) clearTimeout(idleTimeout);
+      idleTimeout = setTimeout(reportIdle, IDLE_TIME);
+    };
+
+    // Idle check - queries latest lastSeenAt to support multi-tab coordination without conflicts
+    const reportIdle = async () => {
+      try {
+        let latestLastSeen = null;
+        if (isConfigured) {
+          const userDocRef = doc(db, 'users', user.uid);
+          const docSnap = await getDoc(userDocRef);
+          if (docSnap.exists()) {
+            latestLastSeen = docSnap.data().lastSeenAt;
+          }
+        } else {
+          const dbUsers = JSON.parse(localStorage.getItem('emulated_users_docs') || '[]');
+          const uDoc = dbUsers.find(u => u.uid === user.uid);
+          if (uDoc) {
+            latestLastSeen = uDoc.lastSeenAt;
+          }
+        }
+
+        if (latestLastSeen) {
+          const lastSeenMs = new Date(latestLastSeen).getTime();
+          const diffMs = Date.now() - lastSeenMs;
+          // If another active tab updated the heartbeat within 4.5 minutes, keep online status!
+          if (diffMs < 4.5 * 60 * 1000) {
+            console.log('Skipping offline: user is active in another session/tab. lastSeen ago (ms):', diffMs);
+            resetIdleTimer();
+            return;
+          }
+        }
+
+        // Set status to offline
+        await updateDbPresence('offline');
+      } catch (err) {
+        console.warn('Error verifying heartbeat during idle transition:', err);
+        await updateDbPresence('offline');
+      }
+    };
+
+    // Activity event bindings
+    const handleActivity = () => {
+      reportActive(false);
+    };
+
+    const handleKeyboardActivity = (e) => {
+      const isTyping = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable;
+      reportActive(isTyping);
+    };
+
+    window.addEventListener('focus', handleActivity);
+    document.addEventListener('mousemove', handleActivity);
+    document.addEventListener('keydown', handleKeyboardActivity);
+    document.addEventListener('mousedown', handleActivity);
+    document.addEventListener('touchstart', handleActivity);
+
+    // Dynamic user-started-typing custom event
+    const handleTypingEvent = () => {
+      reportActive(true);
+    };
+    window.addEventListener('user-started-typing', handleTypingEvent);
+
+    // Initial mount check
+    reportActive(false);
+
+    // Periodically update active status while tab is focused/active
+    heartbeatInterval = setInterval(() => {
+      if (document.hasFocus()) {
+        reportActive(false);
+      }
+    }, HEARTBEAT_INTERVAL);
+
+    return () => {
+      if (idleTimeout) clearTimeout(idleTimeout);
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
+
+      window.removeEventListener('focus', handleActivity);
+      document.removeEventListener('mousemove', handleActivity);
+      document.removeEventListener('keydown', handleKeyboardActivity);
+      document.removeEventListener('mousedown', handleActivity);
+      document.removeEventListener('touchstart', handleActivity);
+      window.removeEventListener('user-started-typing', handleTypingEvent);
+    };
   }, [user]);
 
   // ========================================================
@@ -680,7 +863,7 @@ function SlackDashboard({ user, logout }) {
             ...d, 
             ...updatedFields, 
             name: updatedFields.name || d.name, 
-            status: updatedFields.onlineStatus || d.status 
+            status: updatedFields.presenceStatus || updatedFields.onlineStatus || d.status 
           } : d);
           return { ...ws, dms: updatedDms };
         }
@@ -761,6 +944,9 @@ function SlackDashboard({ user, logout }) {
   const handleTypingStart = async () => {
     if (!user || !activeWorkspaceId || !activeDestinationId) return;
     console.log('✍️ handleTypingStart triggered in App.jsx for user:', user.name);
+
+    // Dispatch event to instantly trigger presence update to online
+    window.dispatchEvent(new CustomEvent('user-started-typing'));
 
     if (isConfigured) {
       try {
@@ -1763,7 +1949,7 @@ function SlackDashboard({ user, logout }) {
       name: u.name,
       email: u.email,
       avatar: u.avatarInitials,
-      status: u.onlineStatus || 'offline',
+      status: u.presenceStatus || u.onlineStatus || 'offline',
       role: roleText
     };
   });

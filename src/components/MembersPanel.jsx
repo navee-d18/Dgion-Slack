@@ -84,7 +84,7 @@ export default function MembersPanel({
                     
                     {/* Miniature Presence indicators */}
                     <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white shrink-0 ${
-                      member.status === 'online' ? 'bg-[#2BAC76]' : member.status === 'away' ? 'bg-[#ECB22E]' : 'bg-slate-300'
+                      member.status === 'online' ? 'bg-[#2BAC76]' : 'bg-slate-300'
                     }`} />
                   </div>
 
@@ -138,7 +138,7 @@ export default function MembersPanel({
               <div className={`w-24 h-24 rounded-full text-white font-extrabold flex items-center justify-center text-3xl mb-4 relative shadow-md ${getAvatarColorClass(selectedMember.name)}`}>
                 {getInitials(selectedMember.name)}
                 <span className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-4 border-white shrink-0 ${
-                  selectedMember.status === 'online' ? 'bg-[#2BAC76]' : selectedMember.status === 'away' ? 'bg-[#ECB22E]' : 'bg-slate-300'
+                  selectedMember.status === 'online' ? 'bg-[#2BAC76]' : 'bg-slate-300'
                 }`} />
               </div>
               <h3 className="text-[17px] font-extrabold text-[#1D1C1D] leading-tight tracking-tight">

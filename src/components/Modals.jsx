@@ -1879,11 +1879,9 @@ export function UserProfileModal({
                 className={`absolute -bottom-2 -right-2 w-7 h-7 rounded-full border-4 border-white flex items-center justify-center shadow-md select-none shrink-0 z-20 ${
                   resolvedUser.status === 'online'
                     ? 'bg-[#2BAC76]'
-                    : resolvedUser.status === 'away'
-                      ? 'bg-[#ECB22E]'
-                      : 'bg-slate-400'
+                    : 'bg-slate-400'
                 }`}
-                title={`${resolvedUser.status || 'offline'} presence`}
+                title={`${resolvedUser.status === 'online' ? 'online' : 'offline'} presence`}
               />
             )}
           </div>
@@ -1891,9 +1889,6 @@ export function UserProfileModal({
           {/* User Title Information */}
           <h2 className="text-xl font-extrabold text-[#1D1C1D] mt-3.5 tracking-tight flex items-center gap-1.5 justify-center">
             <span>{resolvedUser.name}</span>
-            {!isUnavailable && resolvedUser.status === 'away' && (
-              <span className="text-[12px] text-amber-500" title="Away">🌙</span>
-            )}
           </h2>
           
           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1 select-none">
@@ -1972,7 +1967,6 @@ export function UserProfileModal({
                         className="w-full text-xs font-bold p-2.5 border border-slate-200 focus:border-[#522653] focus:outline-none rounded-lg bg-white cursor-pointer"
                       >
                         <option value="online">🟢 Online</option>
-                        <option value="away">🌙 Away</option>
                         <option value="offline">⚫ Offline</option>
                       </select>
                     </div>

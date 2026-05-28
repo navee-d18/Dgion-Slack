@@ -53,7 +53,11 @@ export function AuthProvider({ children }) {
               
               // Proactively set user online on session load
               try {
-                await updateDoc(userDocRef, { onlineStatus: 'online' });
+                await updateDoc(userDocRef, { 
+                  presenceStatus: 'online',
+                  onlineStatus: 'online',
+                  lastSeenAt: new Date().toISOString()
+                });
               } catch (e) {
                 console.warn('Error updating presence on load:', e);
               }
@@ -121,7 +125,10 @@ export function AuthProvider({ children }) {
           email: cleanEmail,
           avatarInitials: initials,
           role: 'Workspace Member',
+          presenceStatus: 'online',
           onlineStatus: 'online',
+          lastSeenAt: new Date().toISOString(),
+          statusText: 'Available',
           createdAt: new Date().toISOString()
         };
         await setDoc(doc(db, 'users', firebaseUser.uid), userDocData);
@@ -152,7 +159,10 @@ export function AuthProvider({ children }) {
             email: cleanEmail,
             avatarInitials: initials,
             role: 'Workspace Member',
+            presenceStatus: 'online',
             onlineStatus: 'online',
+            lastSeenAt: new Date().toISOString(),
+            statusText: 'Available',
             createdAt: new Date().toISOString()
           };
 
@@ -197,12 +207,24 @@ export function AuthProvider({ children }) {
           email: firebaseUser.email,
           avatarInitials: getInitials(firebaseUser.displayName || 'Slack User'),
           role: 'Workspace Member',
-          onlineStatus: 'online'
+          presenceStatus: 'online',
+          onlineStatus: 'online',
+          lastSeenAt: new Date().toISOString()
         };
 
         if (userDocSnap.exists()) {
-          mergedUser = { ...mergedUser, ...userDocSnap.data(), onlineStatus: 'online' };
-          await updateDoc(userDocRef, { onlineStatus: 'online' });
+          mergedUser = { 
+            ...mergedUser, 
+            ...userDocSnap.data(), 
+            presenceStatus: 'online',
+            onlineStatus: 'online',
+            lastSeenAt: new Date().toISOString()
+          };
+          await updateDoc(userDocRef, { 
+            presenceStatus: 'online',
+            onlineStatus: 'online',
+            lastSeenAt: new Date().toISOString()
+          });
         }
         
         setUser(mergedUser);
@@ -237,7 +259,9 @@ export function AuthProvider({ children }) {
           const matchedUser = localUsers.find(u => u.uid === match.uid);
           
           if (matchedUser) {
+            matchedUser.presenceStatus = 'online';
             matchedUser.onlineStatus = 'online';
+            matchedUser.lastSeenAt = new Date().toISOString();
             // Save online update back
             localStorage.setItem('emulated_users_docs', JSON.stringify(localUsers));
           }
@@ -248,7 +272,9 @@ export function AuthProvider({ children }) {
             email: cleanEmail,
             avatarInitials: getInitials(cleanEmail.split('@')[0]),
             role: 'Workspace Member',
-            onlineStatus: 'online'
+            presenceStatus: 'online',
+            onlineStatus: 'online',
+            lastSeenAt: new Date().toISOString()
           };
 
           localStorage.setItem('emulated_session', JSON.stringify(loggedInUser));
@@ -282,12 +308,24 @@ export function AuthProvider({ children }) {
           email: firebaseUser.email,
           avatarInitials: getInitials(firebaseUser.displayName || 'Slack User'),
           role: 'Workspace Member',
-          onlineStatus: 'online'
+          presenceStatus: 'online',
+          onlineStatus: 'online',
+          lastSeenAt: new Date().toISOString()
         };
 
         if (userDocSnap.exists()) {
-          mergedUser = { ...mergedUser, ...userDocSnap.data(), onlineStatus: 'online' };
-          await updateDoc(userDocRef, { onlineStatus: 'online' });
+          mergedUser = { 
+            ...mergedUser, 
+            ...userDocSnap.data(), 
+            presenceStatus: 'online',
+            onlineStatus: 'online',
+            lastSeenAt: new Date().toISOString()
+          };
+          await updateDoc(userDocRef, { 
+            presenceStatus: 'online',
+            onlineStatus: 'online',
+            lastSeenAt: new Date().toISOString()
+          });
         } else {
           const userDocData = {
             uid: firebaseUser.uid,
@@ -295,7 +333,10 @@ export function AuthProvider({ children }) {
             email: firebaseUser.email,
             avatarInitials: getInitials(firebaseUser.displayName || 'Slack User'),
             role: 'Workspace Member',
+            presenceStatus: 'online',
             onlineStatus: 'online',
+            lastSeenAt: new Date().toISOString(),
+            statusText: 'Available',
             createdAt: new Date().toISOString()
           };
           await setDoc(userDocRef, userDocData);
@@ -319,7 +360,10 @@ export function AuthProvider({ children }) {
             email: 'google.user@gmail.com',
             avatarInitials: 'GU',
             role: 'Workspace Member',
+            presenceStatus: 'online',
             onlineStatus: 'online',
+            lastSeenAt: new Date().toISOString(),
+            statusText: 'Available',
             createdAt: new Date().toISOString()
           };
 
@@ -349,9 +393,13 @@ export function AuthProvider({ children }) {
         if (user?.uid) {
           // Set user status to offline in Firestore before logging out
           try {
-            await updateDoc(doc(db, 'users', user.uid), { onlineStatus: 'offline' });
+            await updateDoc(doc(db, 'users', user.uid), { 
+              presenceStatus: 'offline',
+              onlineStatus: 'offline',
+              lastSeenAt: new Date().toISOString()
+            });
           } catch (e) {
-            console.warn('Could not set onlineStatus to offline on logout:', e);
+            console.warn('Could not set presenceStatus to offline on logout:', e);
           }
         }
         await signOut(auth);
@@ -367,7 +415,12 @@ export function AuthProvider({ children }) {
         const localUsers = JSON.parse(localStorage.getItem('emulated_users_docs') || '[]');
         const updated = localUsers.map(u => {
           if (u.uid === user.uid) {
-            return { ...u, onlineStatus: 'offline' };
+            return { 
+              ...u, 
+              presenceStatus: 'offline',
+              onlineStatus: 'offline',
+              lastSeenAt: new Date().toISOString()
+            };
           }
           return u;
         });

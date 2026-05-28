@@ -288,9 +288,7 @@ export default function ChannelNav({
                       className={`w-2 h-2 rounded-full shrink-0 transition-colors ${
                         dm.status === 'online' 
                           ? 'bg-[#2BAC76]' 
-                          : dm.status === 'away' 
-                            ? 'bg-[#ECB22E]' 
-                            : 'bg-white/20'
+                          : 'bg-white/20'
                       }`}
                     />
                     <span className="truncate flex-1">{dm.name}</span>
