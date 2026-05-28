@@ -655,6 +655,61 @@ function SlackDashboard({ user, logout }) {
     }
   };
 
+  const handleUpdateUserProfile = async (uid, updatedFields) => {
+    if (isConfigured) {
+      try {
+        const userDocRef = doc(db, 'users', uid);
+        await updateDoc(userDocRef, updatedFields);
+      } catch (err) {
+        console.error('Error updating user profile:', err);
+        throw err;
+      }
+    } else {
+      // LocalStorage Emulator mode
+      const dbUsers = JSON.parse(localStorage.getItem('emulated_users_docs') || '[]');
+      const updated = dbUsers.map(u => u.uid === uid ? { ...u, ...updatedFields } : u);
+      localStorage.setItem('emulated_users_docs', JSON.stringify(updated));
+      
+      // Force trigger state updates for allRegisteredUsers
+      setAllRegisteredUsers(updated.map(u => ({ id: u.uid, ...u })));
+      
+      // Sync emulated workspaces state so that DM lists update instantly
+      setWorkspaces(prev => prev.map(ws => {
+        if (ws.dms) {
+          const updatedDms = ws.dms.map(d => d.id === uid ? { 
+            ...d, 
+            ...updatedFields, 
+            name: updatedFields.name || d.name, 
+            status: updatedFields.onlineStatus || d.status 
+          } : d);
+          return { ...ws, dms: updatedDms };
+        }
+        return ws;
+      }));
+
+      // Also update emulated session key if updating ourselves
+      if (uid === user?.uid) {
+        const session = JSON.parse(localStorage.getItem('emulated_session') || '{}');
+        if (session.uid === uid) {
+          const updatedSession = { ...session, ...updatedFields };
+          localStorage.setItem('emulated_session', JSON.stringify(updatedSession));
+        }
+      }
+    }
+  };
+
+  const handleStartDirectMessage = (targetUserId) => {
+    if (isDestinationDm && activeDestinationId === targetUserId) {
+      setSelectedProfileUser(null);
+      return;
+    }
+    setActiveDestinationId(targetUserId);
+    setIsDestinationDm(true);
+    setHighlightedMessageId(null);
+    setActiveThreadMessageId(null);
+    setSelectedProfileUser(null);
+  };
+
   const handleMarkAsRead = async (destinationId, workspaceId = activeWorkspaceId) => {
     if (!workspaceId || !destinationId || !user) return;
 
@@ -1936,6 +1991,7 @@ function SlackDashboard({ user, logout }) {
             onInviteClick={() => setActiveModal('invite_people')}
             currentUser={user}
             onRemoveMember={handleRemoveMember}
+            onOpenProfile={handleOpenProfile}
           />
         ) : null}
       </main>
@@ -2011,6 +2067,13 @@ function SlackDashboard({ user, logout }) {
         isOpen={!!selectedProfileUser}
         onClose={() => setSelectedProfileUser(null)}
         user={selectedProfileUser}
+        allMembers={activeWorkspace?.allWorkspaceMembers || []}
+        workspaceName={activeWorkspace?.name || ''}
+        onStartDM={handleStartDirectMessage}
+        onUpdateProfile={handleUpdateUserProfile}
+        onRemoveMember={handleRemoveMember}
+        currentUser={user}
+        isCreator={activeWorkspace?.createdBy === user?.uid}
       />
 
       {/* Floating Sync Error Notification Banner */}

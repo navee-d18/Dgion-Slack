@@ -289,7 +289,7 @@ export default function ChannelNav({
                         dm.status === 'online' 
                           ? 'bg-[#2BAC76]' 
                           : dm.status === 'away' 
-                            ? 'border border-white/50 bg-transparent' 
+                            ? 'bg-[#ECB22E]' 
                             : 'bg-white/20'
                       }`}
                     />

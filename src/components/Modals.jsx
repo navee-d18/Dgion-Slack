@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Hash, Lock, Search, MessageSquare, Briefcase, Mail, Settings, Trash2, Bell, HelpCircle, Copy, Check } from 'lucide-react';
+import { X, Hash, Lock, Search, MessageSquare, Briefcase, Mail, Settings, Trash2, Bell, HelpCircle, Copy, Check, Calendar, Clock, Edit3, User, MessageCircle } from 'lucide-react';
 
 // Firestore Search Queries
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
@@ -1733,8 +1733,54 @@ export function HelpFeedbackModal({ isOpen, onClose }) {
   );
 }
 
-export function UserProfileModal({ isOpen, onClose, user }) {
+export function UserProfileModal({ 
+  isOpen, 
+  onClose, 
+  user, 
+  allMembers = [], 
+  workspaceName = 'Active Workspace', 
+  onStartDM, 
+  onUpdateProfile, 
+  onRemoveMember,
+  currentUser,
+  isCreator
+}) {
   if (!isOpen || !user) return null;
+
+  // Resolve user dynamically from workspace members list for instant real-time updates
+  const resolvedUser = allMembers.find(m => m.id === user.id) || user;
+  const isUnavailable = resolvedUser.isUnavailable;
+  const isSelf = resolvedUser.id === currentUser?.uid;
+
+  // Editing states
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isChangingStatus, setIsChangingStatus] = useState(false);
+  
+  // Fields state
+  const [editName, setEditName] = useState(resolvedUser.name || '');
+  const [editRole, setEditRole] = useState(resolvedUser.role || 'Workspace Member');
+  const [editOnlineStatus, setEditOnlineStatus] = useState(resolvedUser.status || 'offline');
+  const [editStatusText, setEditStatusText] = useState(resolvedUser.statusText || 'Available');
+
+  // Copy Feedback
+  const [copied, setCopied] = useState(false);
+
+  // Sync edits if resolvedUser changes in real-time
+  useEffect(() => {
+    setEditName(resolvedUser.name || '');
+    setEditRole(resolvedUser.role || 'Workspace Member');
+    setEditOnlineStatus(resolvedUser.status || 'offline');
+    setEditStatusText(resolvedUser.statusText || 'Available');
+  }, [resolvedUser]);
+
+  // Esc Key handler
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const getAvatarColorClass = (name) => {
     const colors = [
@@ -1750,81 +1796,379 @@ export function UserProfileModal({ isOpen, onClose, user }) {
     return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
   };
 
+  const handleCopyEmail = () => {
+    if (!resolvedUser.email) return;
+    navigator.clipboard.writeText(resolvedUser.email);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSaveProfile = async (e) => {
+    e.preventDefault();
+    if (!editName.trim()) return;
+    try {
+      if (onUpdateProfile) {
+        await onUpdateProfile(resolvedUser.id, {
+          name: editName.trim(),
+          role: editRole.trim()
+        });
+      }
+      setIsEditingProfile(false);
+    } catch (err) {
+      alert('Failed to save profile changes.');
+    }
+  };
+
+  const handleSaveStatus = async (e) => {
+    e.preventDefault();
+    try {
+      if (onUpdateProfile) {
+        await onUpdateProfile(resolvedUser.id, {
+          onlineStatus: editOnlineStatus,
+          statusText: editStatusText.trim() || 'Available'
+        });
+      }
+      setIsChangingStatus(false);
+    } catch (err) {
+      alert('Failed to update status.');
+    }
+  };
+
+  const handleMentionUser = () => {
+    window.dispatchEvent(new CustomEvent('insert-mention', { 
+      detail: { userName: resolvedUser.name } 
+    }));
+    onClose();
+  };
+
   return (
     <div 
-      className="fixed inset-0 bg-slate-900/60 backdrop-blur-[2px] flex items-center justify-center z-[200] p-4 animate-in fade-in duration-150 font-sans"
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-[2px] flex items-end sm:items-center justify-center z-[200] p-0 sm:p-4 animate-in fade-in duration-150 font-sans"
       onClick={onClose}
     >
       <div 
-        className="w-full max-w-sm bg-white rounded-xl shadow-slack-popover overflow-hidden flex flex-col border border-[#E8E8E8] animate-in zoom-in-95 duration-150 relative"
+        className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-slack-popover overflow-hidden flex flex-col border border-[#E8E8E8] animate-in slide-in-from-bottom sm:zoom-in-95 duration-200 relative max-h-[85vh] sm:max-h-none"
         onClick={(e) => e.stopPropagation()}
+        style={{
+          animationName: window.innerWidth < 640 ? 'slideUp' : undefined,
+          animationDuration: '0.2s',
+          animationTimingFunction: 'ease-out'
+        }}
       >
-        {/* Cover Accent */}
-        <div className="h-16 bg-[#522653] w-full relative" />
+        {/* Cover Accent Header */}
+        <div className="h-20 bg-[#522653] w-full relative flex items-center justify-end px-4 shrink-0">
+          {/* Close button */}
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-full bg-black/15 hover:bg-black/35 text-white transition-colors cursor-pointer"
+            aria-label="Close modal"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
 
-        {/* Close Button */}
-        <button
-          onClick={onClose}
-          className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/10 hover:bg-black/20 text-white transition-colors"
-          aria-label="Close modal"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        {/* Avatar and Info Block (Fixed layout, no clipping) */}
+        <div className="px-6 flex flex-col items-center text-center select-none shrink-0 relative pb-4 border-b border-slate-100">
+          {/* Massive Avatar */}
+          <div className={`w-24 h-24 rounded-2xl border-4 border-white text-white font-extrabold flex items-center justify-center text-3xl shadow-md -mt-12 select-none relative z-10 ${getAvatarColorClass(resolvedUser.name || 'Unknown')}`}>
+            {getInitials(resolvedUser.name || 'US')}
 
-        {/* Profile Card Body */}
-        <div className="px-6 pb-6 relative flex flex-col items-center">
-          {/* Large Avatar */}
-          <div className={`w-20 h-20 rounded-2xl border-4 border-white text-white font-extrabold flex items-center justify-center text-2xl shadow-md -mt-10 select-none ${getAvatarColorClass(user.name || 'Unknown')}`}>
-            {getInitials(user.name || 'US')}
+            {/* Real-time Status Badge Overlay */}
+            {!isUnavailable && (
+              <div 
+                className={`absolute -bottom-2 -right-2 w-7 h-7 rounded-full border-4 border-white flex items-center justify-center shadow-md select-none shrink-0 z-20 ${
+                  resolvedUser.status === 'online'
+                    ? 'bg-[#2BAC76]'
+                    : resolvedUser.status === 'away'
+                      ? 'bg-[#ECB22E]'
+                      : 'bg-slate-400'
+                }`}
+                title={`${resolvedUser.status || 'offline'} presence`}
+              />
+            )}
           </div>
 
-          {/* Member Name */}
-          <h2 className="text-lg font-extrabold text-[#1D1C1D] mt-3 tracking-tight">
-            {user.name}
+          {/* User Title Information */}
+          <h2 className="text-xl font-extrabold text-[#1D1C1D] mt-3.5 tracking-tight flex items-center gap-1.5 justify-center">
+            <span>{resolvedUser.name}</span>
+            {!isUnavailable && resolvedUser.status === 'away' && (
+              <span className="text-[12px] text-amber-500" title="Away">🌙</span>
+            )}
           </h2>
+          
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1 select-none">
+            {workspaceName}
+          </p>
+        </div>
 
-          {/* Online Status Badge */}
-          {!user.isUnavailable && (
-            <div className="flex items-center gap-1.5 mt-1.5">
-              <span className={`w-2 h-2 rounded-full ${user.status === 'online' ? 'bg-[#2BAC76]' : 'bg-slate-300'}`} />
-              <span className="text-xs font-bold text-slate-500 capitalize">{user.status || 'offline'}</span>
-            </div>
-          )}
-
-          {/* Divider */}
-          <div className="w-full border-t border-slate-100 my-4" />
-
-          {/* Fields */}
-          {user.isUnavailable ? (
-            <div className="w-full text-center py-2">
-              <p className="text-sm font-bold text-red-500">User no longer available</p>
-              <p className="text-[11px] text-slate-400 font-medium mt-1">This user is no longer a member of this workspace.</p>
-            </div>
-          ) : (
-            <div className="w-full space-y-3.5 text-left">
-              <div className="flex items-start gap-3">
-                <Briefcase className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Role</p>
-                  <p className="text-xs font-bold text-slate-700 mt-0.5">{user.role || 'Workspace Member'}</p>
-                </div>
+        {/* Modal Scrollable Container (Only for fields) */}
+        <div className="px-6 pb-6 overflow-y-auto custom-scrollbar flex-1 min-h-0">
+          {/* Form / Profile Fields Area */}
+          <div className="py-4">
+            {isUnavailable ? (
+              <div className="w-full text-center py-4 bg-red-50/50 border border-red-100 rounded-xl select-none">
+                <p className="text-sm font-bold text-red-500 flex items-center justify-center gap-1.5">
+                  <span>User no longer available</span>
+                </p>
+                <p className="text-[11.5px] text-slate-400 font-semibold mt-1">This user is no longer a member of this workspace.</p>
               </div>
+            ) : (
+              <>
+                {/* Editing Forms overlay */}
+                {isEditingProfile ? (
+                  <form onSubmit={handleSaveProfile} className="space-y-4 font-sans animate-in fade-in duration-100">
+                    <h3 className="text-xs font-extrabold text-[#1D1C1D] uppercase tracking-wider select-none">Edit Profile Info</h3>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Full Name</label>
+                      <input 
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="w-full text-xs font-bold p-2.5 border border-slate-200 focus:border-[#522653] focus:outline-none rounded-lg bg-white"
+                        placeholder="e.g. Alice Cooper"
+                        required
+                        autoFocus
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Display Job Title / Role</label>
+                      <input 
+                        type="text"
+                        value={editRole}
+                        onChange={(e) => setEditRole(e.target.value)}
+                        className="w-full text-xs font-bold p-2.5 border border-slate-200 focus:border-[#522653] focus:outline-none rounded-lg bg-white"
+                        placeholder="e.g. Lead Designer"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 pt-2">
+                      <button
+                        type="submit"
+                        className="px-3.5 py-1.5 bg-[#522653] hover:bg-[#522653]/90 text-white text-xs font-bold rounded-lg cursor-pointer transition-all hover:scale-[1.02]"
+                      >
+                        Save changes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditingProfile(false);
+                          setEditName(resolvedUser.name || '');
+                          setEditRole(resolvedUser.role || 'Workspace Member');
+                        }}
+                        className="px-3.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-500 text-xs font-bold rounded-lg cursor-pointer transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : isChangingStatus ? (
+                  <form onSubmit={handleSaveStatus} className="space-y-4 font-sans animate-in fade-in duration-100">
+                    <h3 className="text-xs font-extrabold text-[#1D1C1D] uppercase tracking-wider select-none">Change Presence & Status</h3>
+                    
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Presence Indicator</label>
+                      <select
+                        value={editOnlineStatus}
+                        onChange={(e) => setEditOnlineStatus(e.target.value)}
+                        className="w-full text-xs font-bold p-2.5 border border-slate-200 focus:border-[#522653] focus:outline-none rounded-lg bg-white cursor-pointer"
+                      >
+                        <option value="online">🟢 Online</option>
+                        <option value="away">🌙 Away</option>
+                        <option value="offline">⚫ Offline</option>
+                      </select>
+                    </div>
 
-              <div className="flex items-start gap-3">
-                <Mail className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Email Address</p>
-                  <p className="text-xs font-bold text-slate-700 mt-0.5 select-all truncate">{user.email || 'No email shared'}</p>
-                </div>
-              </div>
-            </div>
-          )}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Status Description Text</label>
+                      <input 
+                        type="text"
+                        value={editStatusText}
+                        onChange={(e) => setEditStatusText(e.target.value)}
+                        className="w-full text-xs font-bold p-2.5 border border-slate-200 focus:border-[#522653] focus:outline-none rounded-lg bg-white"
+                        placeholder="What's your active status today?"
+                      />
+                      <div className="flex gap-1 flex-wrap pt-1 select-none">
+                        {['Working today', 'In a meeting', 'Available', 'Out sick', 'On holiday'].map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setEditStatusText(s)}
+                            className="text-[9.5px] px-2 py-0.5 border border-slate-200 hover:border-slate-400 rounded-full font-bold text-slate-500 hover:text-slate-700 bg-white transition-colors cursor-pointer"
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-2">
+                      <button
+                        type="submit"
+                        className="px-3.5 py-1.5 bg-[#522653] hover:bg-[#522653]/90 text-white text-xs font-bold rounded-lg cursor-pointer transition-all hover:scale-[1.02]"
+                      >
+                        Save status
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsChangingStatus(false);
+                          setEditOnlineStatus(resolvedUser.status || 'offline');
+                          setEditStatusText(resolvedUser.statusText || 'Available');
+                        }}
+                        className="px-3.5 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-500 text-xs font-bold rounded-lg cursor-pointer transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  /* Standard Details Fields View */
+                  <div className="space-y-4.5 font-sans">
+                    {/* Status Message Display */}
+                    <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl flex items-center gap-2 select-none">
+                      <span className="text-base leading-none">💬</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Current Status</p>
+                        <p className="text-xs font-bold text-slate-700 mt-0.5 truncate">{resolvedUser.statusText || 'Available'}</p>
+                      </div>
+                    </div>
+
+                    {/* Standard Fields Grid */}
+                    <div className="space-y-4">
+                      {/* Display Job Title */}
+                      <div className="flex items-start gap-3 select-text">
+                        <Briefcase className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider select-none">Role / Title</p>
+                          <p className="text-xs font-bold text-slate-700 mt-0.5">{resolvedUser.role || 'Workspace Member'}</p>
+                        </div>
+                      </div>
+
+                      {/* Email address */}
+                      <div className="flex items-start gap-3 select-text">
+                        <Mail className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider select-none">Email Address</p>
+                          <p className="text-xs font-bold text-[#1164A3] mt-0.5 truncate hover:underline select-all">{resolvedUser.email || `${resolvedUser.id}@acme-corp.com`}</p>
+                        </div>
+                      </div>
+
+                      {/* Joined Date */}
+                      <div className="flex items-start gap-3 select-none">
+                        <Calendar className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Workspace Join Date</p>
+                          <p className="text-xs font-bold text-slate-700 mt-0.5">
+                            Joined {resolvedUser.createdAt ? new Date(resolvedUser.createdAt).toLocaleDateString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric'
+                            }) : 'May 27, 2026'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Last Active */}
+                      <div className="flex items-start gap-3 select-none">
+                        <Clock className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Last Active Presence</p>
+                          <p className="text-xs font-bold text-slate-700 mt-0.5">
+                            {resolvedUser.status === 'online' ? 'Active now' : 'Last active 2 hours ago'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Quick actions buttons panel */}
+                    <div className="border-t border-slate-100 pt-5 mt-5 flex flex-col gap-2 font-sans select-none">
+                      {isSelf ? (
+                        /* Self quick actions */
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setIsEditingProfile(true)}
+                            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-slate-300 text-xs font-bold text-slate-700 rounded-lg cursor-pointer transition-all active:scale-[0.98]"
+                          >
+                            <Edit3 className="w-3.5 h-3.5 text-slate-500" />
+                            <span>Edit Profile</span>
+                          </button>
+                          <button
+                            onClick={() => setIsChangingStatus(true)}
+                            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-slate-300 text-xs font-bold text-slate-700 rounded-lg cursor-pointer transition-all active:scale-[0.98]"
+                          >
+                            <span>💬 Change Status</span>
+                          </button>
+                        </div>
+                      ) : (
+                        /* Other member quick actions */
+                        <>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => {
+                                if (onStartDM) onStartDM(resolvedUser.id);
+                              }}
+                              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 bg-[#522653] hover:bg-[#522653]/90 border border-transparent text-xs font-bold text-white rounded-lg cursor-pointer transition-all active:scale-[0.98] shadow-sm"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                              <span>Send message</span>
+                            </button>
+                            <button
+                              onClick={handleMentionUser}
+                              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-slate-300 text-xs font-bold text-slate-700 rounded-lg cursor-pointer transition-all active:scale-[0.98]"
+                            >
+                              <span>@ Mention</span>
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-2 mt-1">
+                            <button
+                              onClick={handleCopyEmail}
+                              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-slate-300 text-xs font-bold text-slate-700 rounded-lg cursor-pointer transition-all relative"
+                            >
+                              {copied ? (
+                                <span className="text-[#2BAC76] flex items-center gap-1 text-xs font-extrabold animate-in zoom-in-95 duration-100">
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>Copied ✓</span>
+                                </span>
+                              ) : (
+                                <>
+                                  <Copy className="w-3.5 h-3.5 text-slate-500" />
+                                  <span>Copy email</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </>
+                      )}
+
+                      {/* Destructive Action: Remove member - visible only to creator and not for self */}
+                      {isCreator && !isSelf && (
+                        <button
+                          onClick={async () => {
+                            const confirmRemove = window.confirm(
+                              `Are you sure you want to remove ${resolvedUser.name} from this workspace?`
+                            );
+                            if (confirmRemove) {
+                              try {
+                                await onRemoveMember(resolvedUser.id);
+                                onClose();
+                              } catch (err) {
+                                alert(err.message || 'Failed to remove member.');
+                              }
+                            }
+                          }}
+                          className="w-full mt-2 py-2 px-3 bg-white hover:bg-red-50 text-red-600 border border-red-200 hover:border-red-300 text-xs font-bold rounded-lg transition-all active:scale-[0.98] cursor-pointer text-center"
+                        >
+                          Remove from Workspace
+                        </button>
+                      )}
+                    </div>
+                  </div >
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
 }
-
-
-
-

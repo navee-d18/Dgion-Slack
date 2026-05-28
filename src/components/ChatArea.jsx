@@ -329,6 +329,11 @@ export default function ChatArea({
     return member ? member.name : 'Unknown User';
   };
 
+  const getCurrentName = (uid, fallback) => {
+    const member = activeWorkspace?.allWorkspaceMembers?.find(m => m.id === uid);
+    return member ? member.name : fallback;
+  };
+
   const renderReactions = (msg) => {
     const reactions = msg.reactions || {};
     const emojis = Object.keys(reactions);
@@ -484,6 +489,38 @@ export default function ChatArea({
       scrollToBottom();
     }
   }, [activeMessages.length, activeDestinationId]);
+
+  useEffect(() => {
+    const handleInsertMentionEvent = (e) => {
+      const { userName } = e.detail;
+      if (!userName) return;
+      
+      const textToInsert = `@${userName} `;
+      setInputText(prev => {
+        const textarea = textareaRef.current;
+        if (!textarea) return prev + textToInsert;
+        
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const val = textarea.value;
+        
+        const updated = val.substring(0, start) + textToInsert + val.substring(end);
+        
+        // Refocus and place cursor after the mention
+        setTimeout(() => {
+          textarea.focus();
+          const newCursorPos = start + textToInsert.length;
+          textarea.selectionStart = newCursorPos;
+          textarea.selectionEnd = newCursorPos;
+        }, 50);
+        
+        return updated;
+      });
+    };
+    
+    window.addEventListener('insert-mention', handleInsertMentionEvent);
+    return () => window.removeEventListener('insert-mention', handleInsertMentionEvent);
+  }, []);
 
   const insertMarkdown = (token) => {
     const textarea = textareaRef.current;
@@ -888,7 +925,17 @@ export default function ChatArea({
                   activeDm?.status === 'online' ? 'bg-[#2BAC76]' : 'bg-slate-300'
                 }`} />
               )}
-              <span className="truncate">{destinationName}</span>
+              {isDestinationDm ? (
+                <button
+                  onClick={() => onOpenProfile && onOpenProfile(activeDestinationId)}
+                  className="truncate text-left hover:underline cursor-pointer font-bold flex items-center focus:outline-none"
+                  title="View user profile"
+                >
+                  <span className="truncate">{destinationName}</span>
+                </button>
+              ) : (
+                <span className="truncate">{destinationName}</span>
+              )}
               {!isDestinationDm && activeChannel && isCreator && (
                 <button
                   onClick={onChannelSettingsClick}
@@ -1330,15 +1377,21 @@ export default function ChatArea({
                       /* Standard message layout */
                       <>
                         {/* Perfect Avatar Circle badge */}
-                        <div className={`w-9 h-9 rounded-full text-white font-extrabold flex items-center justify-center text-sm shrink-0 shadow-sm transition-all duration-100 hover:scale-105 ${getAvatarColorClass(msg.senderName)}`}>
-                          {getInitials(msg.senderName)}
+                        <div 
+                          onClick={() => onOpenProfile && onOpenProfile(msg.senderId)}
+                          className={`w-9 h-9 rounded-full text-white font-extrabold flex items-center justify-center text-sm shrink-0 shadow-sm transition-all duration-100 hover:scale-105 cursor-pointer ${getAvatarColorClass(getCurrentName(msg.senderId, msg.senderName))}`}
+                        >
+                          {getInitials(getCurrentName(msg.senderId, msg.senderName))}
                         </div>
                         
                         {/* Content Block */}
                         <div className="flex-1 min-w-0 ml-3 font-sans flex flex-col">
                           <div className="flex items-baseline gap-2 mb-0.5 select-none">
-                            <span className="font-bold text-[15px] text-[#1D1C1D] hover:underline cursor-pointer flex items-center gap-1">
-                              <span>{msg.senderName}</span>
+                            <span 
+                              onClick={() => onOpenProfile && onOpenProfile(msg.senderId)}
+                              className="font-bold text-[15px] text-[#1D1C1D] hover:underline cursor-pointer flex items-center gap-1"
+                            >
+                              <span>{getCurrentName(msg.senderId, msg.senderName)}</span>
                               {bookmarks[msg.id] && <Bookmark className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" title="Bookmarked message" />}
                             </span>
                             <span className="text-[12px] text-[#616061] font-medium">

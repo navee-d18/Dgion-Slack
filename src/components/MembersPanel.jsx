@@ -6,7 +6,8 @@ export default function MembersPanel({
   onClose,
   onInviteClick,
   currentUser,
-  onRemoveMember
+  onRemoveMember,
+  onOpenProfile
 }) {
   const [selectedMember, setSelectedMember] = useState(null);
 
@@ -74,7 +75,7 @@ export default function MembersPanel({
               return (
                 <button
                   key={member.id}
-                  onClick={() => setSelectedMember(member)}
+                  onClick={() => onOpenProfile ? onOpenProfile(member.id) : setSelectedMember(member)}
                   className="w-full flex items-center gap-3 px-2.5 py-2 hover:bg-slate-50 border border-transparent rounded-md text-left transition-all duration-100 group"
                 >
                   {/* Perfect Avatar Circle badge */}
@@ -83,14 +84,14 @@ export default function MembersPanel({
                     
                     {/* Miniature Presence indicators */}
                     <span className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white shrink-0 ${
-                      member.status === 'online' ? 'bg-[#2BAC76]' : 'bg-slate-300'
+                      member.status === 'online' ? 'bg-[#2BAC76]' : member.status === 'away' ? 'bg-[#ECB22E]' : 'bg-slate-300'
                     }`} />
                   </div>
 
                   <div className="min-w-0 flex-1 font-sans">
                     <div className="flex items-baseline justify-between gap-1.5">
                       <p className="text-sm font-bold text-[#1D1C1D] truncate group-hover:text-[#1164A3] transition-colors">
-                        {member.name}
+                        {member.name} {member.id === currentUser?.uid && <span className="text-[11px] text-[#616061] font-semibold font-sans normal-case ml-1">(Me)</span>}
                       </p>
                       <span className={`text-[9px] px-1.5 py-0.5 rounded font-extrabold tracking-tight shrink-0 ${
                         isThisMemberCreator ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-slate-100 text-slate-500 border border-slate-200'
@@ -137,11 +138,11 @@ export default function MembersPanel({
               <div className={`w-24 h-24 rounded-full text-white font-extrabold flex items-center justify-center text-3xl mb-4 relative shadow-md ${getAvatarColorClass(selectedMember.name)}`}>
                 {getInitials(selectedMember.name)}
                 <span className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-4 border-white shrink-0 ${
-                  selectedMember.status === 'online' ? 'bg-[#2BAC76]' : 'bg-slate-300'
+                  selectedMember.status === 'online' ? 'bg-[#2BAC76]' : selectedMember.status === 'away' ? 'bg-[#ECB22E]' : 'bg-slate-300'
                 }`} />
               </div>
               <h3 className="text-[17px] font-extrabold text-[#1D1C1D] leading-tight tracking-tight">
-                {selectedMember.name}
+                {selectedMember.name} {selectedMember.id === currentUser?.uid && <span className="text-[12px] text-[#616061] font-semibold ml-1">(Me)</span>}
               </h3>
               <p className="text-sm text-[#616061] mt-1 font-semibold">
                 {activeWorkspace.createdBy === selectedMember.id ? 'Workspace Owner' : 'Workspace Member'}
