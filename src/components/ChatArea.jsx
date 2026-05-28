@@ -387,6 +387,9 @@ export default function ChatArea({
   activeTypers = [],
   onTypingStart,
   onTypingStop,
+  activeRecorders = [],
+  onRecordingStart,
+  onRecordingStop,
   onOpenProfile,
   pinnedPanelOpen = false,
   onTogglePinnedPanel,
@@ -857,6 +860,7 @@ export default function ChatArea({
       setIsRecording(true);
       setIsRecordingPaused(false);
       setRecordingDuration(0);
+      if (onRecordingStart) onRecordingStart();
 
       // Start countdown / up timer
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
@@ -882,6 +886,7 @@ export default function ChatArea({
       mediaRecorderRef.current.pause();
       setIsRecordingPaused(true);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      if (onRecordingStop) onRecordingStop();
     }
   };
 
@@ -889,6 +894,7 @@ export default function ChatArea({
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
       mediaRecorderRef.current.resume();
       setIsRecordingPaused(false);
+      if (onRecordingStart) onRecordingStart();
       
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = setInterval(() => {
@@ -921,6 +927,7 @@ export default function ChatArea({
     setRecordingDuration(0);
     setRecordedBlob(null);
     chunksRef.current = [];
+    if (onRecordingStop) onRecordingStop();
   };
 
   const handleStopRecordingForced = () => {
@@ -931,9 +938,11 @@ export default function ChatArea({
       streamRef.current.getTracks().forEach(track => track.stop());
     }
     setIsRecordingPaused(false);
+    if (onRecordingStop) onRecordingStop();
   };
 
   const handleSendVoiceNote = async () => {
+    if (onRecordingStop) onRecordingStop();
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     
     const sendBlob = async (blob) => {
@@ -1790,9 +1799,36 @@ export default function ChatArea({
 
       {/* 3. COMPOSER PANEL - FLOATING ROUNDED BOX WITH EXACT TOOLBAR STYLE */}
       <footer className="p-6 pt-1 select-none shrink-0 bg-white">
-        {/* Typing status bar */}
+        {/* Typing & Recording status bar */}
         <div className="h-5 flex items-center mb-1 px-1">
-          {activeTypers && activeTypers.length > 0 && (
+          {activeRecorders && activeRecorders.length > 0 ? (
+            <div className="text-[12px] text-slate-500 font-medium flex items-center gap-1.5 animate-in fade-in duration-200">
+              <span className="inline-flex items-center justify-center text-[11px] animate-pulse">🎤</span>
+              <span className="truncate max-w-[240px] font-bold text-slate-600">
+                {activeRecorders.length === 1
+                  ? `${activeRecorders[0].userName}`
+                  : activeRecorders.length === 2
+                    ? `${activeRecorders[0].userName} and ${activeRecorders[1].userName}`
+                    : `${activeRecorders[0].userName}, ${activeRecorders[1].userName} and ${activeRecorders.length - 2} others`
+                }
+              </span>
+              <span>
+                {activeRecorders.length === 1
+                  ? isDestinationDm 
+                    ? 'is recording...' 
+                    : 'is recording a voice note...'
+                  : isDestinationDm 
+                    ? 'are recording...' 
+                    : 'are recording a voice note...'
+                }
+              </span>
+              <span className="flex items-center gap-0.5 ml-1 select-none">
+                <span className="w-0.5 h-2 bg-[#1164A3] rounded-full animate-bounce [animation-delay:-0.3s]" />
+                <span className="w-0.5 h-3 bg-[#1164A3] rounded-full animate-bounce [animation-delay:-0.15s]" />
+                <span className="w-0.5 h-1 bg-[#1164A3] rounded-full animate-bounce" />
+              </span>
+            </div>
+          ) : activeTypers && activeTypers.length > 0 ? (
             <div className="text-[12px] text-slate-500 font-medium flex items-center gap-1.5 animate-in fade-in duration-200">
               <span className="truncate max-w-[240px] font-bold text-slate-600">
                 {activeTypers.length === 1
@@ -1809,7 +1845,7 @@ export default function ChatArea({
                 <span className="w-1 h-1 rounded-full bg-slate-500 animate-bounce" />
               </span>
             </div>
-          )}
+          ) : null}
         </div>
         <div className="relative">
           {/* Mention Dropdown list */}

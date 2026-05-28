@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import WorkspaceSidebar from './components/WorkspaceSidebar';
 import ChannelNav from './components/ChannelNav';
 import ChatArea from './components/ChatArea';
@@ -700,7 +700,66 @@ function SlackDashboard({ user, logout }) {
   }, [activeWorkspaceId, activeDestinationId, user]);
 
   // ========================================================
-  // 5.9. TYPING STATUS CLEANUP ON UNLOAD / LOGOUT / UNMOUNT
+  // 5.7b. REACTIVE COMPUTATION: VOICE RECORDING STATUS
+  // ========================================================
+  const activeRecorders = useMemo(() => {
+    if (!user || !activeWorkspaceId || !activeDestinationId || !allRegisteredUsers) return [];
+    
+    const recorders = [];
+    
+    allRegisteredUsers.forEach((member) => {
+      const memberUid = member.uid || member.id;
+      if (memberUid === user.uid) return;
+      
+      const rec = member.voiceRecording;
+      if (!rec || !rec.isRecordingVoice) return;
+      
+      const isChannelMatch = !rec.isDestinationDm && rec.destinationId === activeDestinationId;
+      const isDmMatchTarget = rec.isDestinationDm && 
+                              memberUid === activeDestinationId && 
+                              rec.destinationId === user.uid;
+
+      if (
+        rec.workspaceId === activeWorkspaceId &&
+        (isChannelMatch || isDmMatchTarget)
+      ) {
+        recorders.push({
+          userId: memberUid,
+          userName: member.name
+        });
+      }
+    });
+    
+    return recorders;
+  }, [allRegisteredUsers, activeWorkspaceId, activeDestinationId, user]);
+
+  // ========================================================
+  // 5.8b. LOCAL STORAGE SYNC: REGISTERED USERS (EMULATOR MODE)
+  // ========================================================
+  useEffect(() => {
+    if (isConfigured || !user) return;
+
+    const loadLocalUsers = () => {
+      const dbUsers = JSON.parse(localStorage.getItem('emulated_users_docs') || '[]');
+      setAllRegisteredUsers(dbUsers.map(u => ({ id: u.uid, ...u })));
+    };
+
+    const handleStorage = (e) => {
+      if (e.key === 'emulated_users_docs') {
+        loadLocalUsers();
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('slack_local_users_update', loadLocalUsers);
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('slack_local_users_update', loadLocalUsers);
+    };
+  }, [user]);
+
+  // ========================================================
+  // 5.9. TYPING & RECORDING STATUS CLEANUP ON UNLOAD / LOGOUT / UNMOUNT
   // ========================================================
   useEffect(() => {
     const cleanup = () => {
@@ -709,6 +768,12 @@ function SlackDashboard({ user, logout }) {
           try {
             const docRef = doc(db, 'typing_status', user.uid);
             deleteDoc(docRef).catch(() => {});
+          } catch (e) {}
+          try {
+            const userDocRef = doc(db, 'users', user.uid);
+            updateDoc(userDocRef, {
+              voiceRecording: null
+            }).catch(() => {});
           } catch (e) {}
         } else {
           try {
@@ -719,6 +784,18 @@ function SlackDashboard({ user, logout }) {
               window.dispatchEvent(new Event('storage'));
               window.dispatchEvent(new Event('slack_local_typing_update'));
             }
+          } catch (e) {}
+          try {
+            const localKey = 'emulated_users_docs';
+            const dbUsers = JSON.parse(localStorage.getItem(localKey) || '[]');
+            const updated = dbUsers.map(u => 
+              u.uid === user.uid 
+                ? { ...u, voiceRecording: null } 
+                : u
+            );
+            localStorage.setItem(localKey, JSON.stringify(updated));
+            window.dispatchEvent(new Event('storage'));
+            window.dispatchEvent(new Event('slack_local_users_update'));
           } catch (e) {}
         }
       }
@@ -1009,6 +1086,80 @@ function SlackDashboard({ user, logout }) {
         }
       } catch (err) {
         console.warn('Error stopping typing locally:', err);
+      }
+    }
+  };
+
+  // Start voice recording status helper
+  const handleRecordingStart = async () => {
+    if (!user || !activeWorkspaceId || !activeDestinationId) return;
+    console.log('🎤 handleRecordingStart triggered in App.jsx for user:', user.name);
+
+    const recordingPayload = {
+      workspaceId: activeWorkspaceId,
+      destinationId: activeDestinationId,
+      isDestinationDm: isDestinationDm,
+      userId: user.uid,
+      userName: user.name,
+      isRecordingVoice: true,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (isConfigured) {
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        await updateDoc(userDocRef, {
+          voiceRecording: recordingPayload
+        });
+      } catch (err) {
+        console.warn('Error starting recording in Firestore:', err);
+      }
+    } else {
+      try {
+        const localKey = 'emulated_users_docs';
+        const dbUsers = JSON.parse(localStorage.getItem(localKey) || '[]');
+        const updated = dbUsers.map(u => 
+          u.uid === user.uid 
+            ? { ...u, voiceRecording: recordingPayload } 
+            : u
+        );
+        localStorage.setItem(localKey, JSON.stringify(updated));
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('slack_local_users_update'));
+      } catch (err) {
+        console.warn('Error starting recording locally:', err);
+      }
+    }
+  };
+
+  // Stop voice recording status helper
+  const handleRecordingStop = async () => {
+    if (!user) return;
+    console.log('🛑 handleRecordingStop triggered in App.jsx for user:', user.name);
+
+    if (isConfigured) {
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        await updateDoc(userDocRef, {
+          voiceRecording: null
+        });
+      } catch (err) {
+        console.warn('Error stopping recording in Firestore:', err);
+      }
+    } else {
+      try {
+        const localKey = 'emulated_users_docs';
+        const dbUsers = JSON.parse(localStorage.getItem(localKey) || '[]');
+        const updated = dbUsers.map(u => 
+          u.uid === user.uid 
+            ? { ...u, voiceRecording: null } 
+            : u
+        );
+        localStorage.setItem(localKey, JSON.stringify(updated));
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('slack_local_users_update'));
+      } catch (err) {
+        console.warn('Error stopping recording locally:', err);
       }
     }
   };
@@ -2130,6 +2281,9 @@ function SlackDashboard({ user, logout }) {
           activeTypers={activeTypers}
           onTypingStart={handleTypingStart}
           onTypingStop={handleTypingStop}
+          activeRecorders={activeRecorders}
+          onRecordingStart={handleRecordingStart}
+          onRecordingStop={handleRecordingStop}
           onOpenProfile={handleOpenProfile}
           pinnedPanelOpen={pinnedPanelOpen}
           onTogglePinnedPanel={() => {
