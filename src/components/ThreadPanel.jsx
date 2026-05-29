@@ -768,7 +768,7 @@ export default function ThreadPanel({
     : `#${activeWorkspace?.channels?.find(c => c.id === activeDestinationId)?.name || 'channel'}`;
 
   return (
-    <div className="w-[380px] sm:w-[400px] border-l border-[#E8E8E8] h-full flex flex-col bg-white shrink-0 font-sans z-[20] shadow-sm relative overflow-hidden flex flex-col h-full bg-[#FFFFFF]">
+    <div className="absolute inset-0 z-30 sm:relative sm:inset-auto sm:z-[20] w-full sm:w-[400px] border-l border-[#E8E8E8] h-full flex flex-col bg-[#FFFFFF] shrink-0 font-sans shadow-sm overflow-hidden">
       
       {/* HEADER */}
       <header className="h-[52px] bg-[#FFFFFF] border-b border-[#E8E8E8] px-4 flex items-center justify-between shrink-0 select-none">

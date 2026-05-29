@@ -76,7 +76,7 @@ export default function PinnedPanel({
 
   return (
     <div 
-      className="w-full sm:w-[280px] md:w-[320px] border-l border-[#E8E8E8] flex flex-col h-full bg-[#FFFFFF] select-none shrink-0 relative animate-in slide-in-from-right duration-100 font-sans"
+      className="absolute inset-0 z-30 sm:relative sm:inset-auto sm:z-auto w-full sm:w-[280px] md:w-[320px] border-l border-[#E8E8E8] flex flex-col h-full bg-[#FFFFFF] select-none shrink-0 animate-in slide-in-from-right duration-100 font-sans"
       aria-label="Pinned messages panel"
     >
       {/* Header */}

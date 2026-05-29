@@ -2506,7 +2506,7 @@ export default function ChatArea({
               )}
 
               {/* Polished Bottom Toolbar */}
-              <div className="px-3 py-2 bg-slate-50 border-t border-[#E8E8E8] flex items-center justify-between select-none">
+              <div className="px-3 py-2 bg-slate-50 border-t border-[#E8E8E8] flex items-center justify-between gap-2 select-none">
                 {/* Hidden native file uploader input */}
                 <input 
                   type="file"
@@ -2517,7 +2517,7 @@ export default function ChatArea({
                 />
 
                 {/* Toolbar Icons */}
-                <div className="flex items-center gap-1.5 text-slate-500">
+                <div className="flex items-center gap-1.5 text-slate-500 min-w-0 overflow-x-auto scrollbar-none">
                   <button 
                     type="button" 
                     onClick={() => insertMarkdown('bold')}
@@ -2586,7 +2586,7 @@ export default function ChatArea({
                 </div>
 
                 {/* Send and Schedule Controls */}
-                <div className="flex items-center gap-2 relative">
+                <div className="flex items-center gap-2 relative shrink-0">
                   {/* Highly polished calendar-clock Schedule Button */}
                   <button
                     type="button"
