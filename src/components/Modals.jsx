@@ -311,7 +311,7 @@ export function CreateWorkspaceModal({ isOpen, onClose, onCreate }) {
 }
 
 // Search Modal
-export function SearchModal({ isOpen, onClose, activeWorkspace, allMessages, onJumpTo }) {
+export function SearchModal({ isOpen, onClose, activeWorkspace, allMessages, onJumpTo, user }) {
   const [queryText, setQueryText] = useState('');
   const [results, setResults] = useState({ channels: [], messages: [] });
   const [cloudMessages, setCloudMessages] = useState([]);
@@ -390,6 +390,9 @@ export function SearchModal({ isOpen, onClose, activeWorkspace, allMessages, onJ
     if (isConfigured) {
       // Real Cloud Search: search in our live workspaces messages document logs
       cloudMessages.forEach(msg => {
+        if (msg.deletedForEveryone) return;
+        if (msg.deletedFor && msg.deletedFor.includes(user?.uid)) return;
+
         if (msg.content.toLowerCase().includes(cleanQuery)) {
           const isDm = activeWorkspace.dms.some(d => d.id === msg.channelId);
           const isPrivate = activeWorkspace.channels.find(c => c.id === msg.channelId)?.isPrivate || false;
@@ -423,6 +426,9 @@ export function SearchModal({ isOpen, onClose, activeWorkspace, allMessages, onJ
           const isDm = activeWorkspace.dms.some(d => d.id === destId);
 
           msgList.forEach(msg => {
+            if (msg.deletedForEveryone) return;
+            if (msg.deletedFor && msg.deletedFor.includes(user?.uid)) return;
+
             if (msg.content.toLowerCase().includes(cleanQuery)) {
               matchingMessages.push({
                 ...msg,

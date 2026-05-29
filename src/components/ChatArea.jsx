@@ -501,6 +501,7 @@ export default function ChatArea({
   };
 
   const renderReactions = (msg) => {
+    if (msg.deletedForEveryone) return null;
     const reactions = msg.reactions || {};
     const emojis = Object.keys(reactions);
     if (emojis.length === 0) {
@@ -1481,7 +1482,7 @@ export default function ChatArea({
         {/* Message Log Stack */}
         <div className="space-y-[3px]">
           {(() => {
-            const mainMessages = activeMessages.filter(m => !m.parentMessageId);
+            const mainMessages = activeMessages.filter(m => !m.parentMessageId && !(m.deletedFor && m.deletedFor.includes(user?.uid)));
             return mainMessages.map((msg, index) => {
               const prevMsg = index > 0 ? mainMessages[index - 1] : null;
               const currentDate = getMessageDate(msg);
@@ -1524,135 +1525,137 @@ export default function ChatArea({
                     }`}
                   >
                     {/* Floating message toolbar */}
-                    <div className={`absolute right-6 -top-3.5 ${activeMenuMessageId === msg.id || activeToolbarReactionPickerId === msg.id ? 'flex' : 'hidden group-hover:flex'} items-center gap-0.5 bg-white border border-[#E8E8E8] rounded-lg shadow-slack-popover p-0.5 z-[20] animate-in fade-in duration-75`}>
-                      
-                      {/* Add reaction button */}
-                      <div className="relative">
+                    {!msg.deletedForEveryone && (
+                      <div className={`absolute right-6 -top-3.5 ${activeMenuMessageId === msg.id || activeToolbarReactionPickerId === msg.id ? 'flex' : 'hidden group-hover:flex'} items-center gap-0.5 bg-white border border-[#E8E8E8] rounded-lg shadow-slack-popover p-0.5 z-[20] animate-in fade-in duration-75`}>
+                        
+                        {/* Add reaction button */}
+                        <div className="relative">
+                          <button 
+                            onClick={() => setActiveToolbarReactionPickerId(activeToolbarReactionPickerId === msg.id ? null : msg.id)}
+                            className={`p-1 rounded animate-in zoom-in-95 duration-100 cursor-pointer ${
+                              activeToolbarReactionPickerId === msg.id ? 'bg-slate-100 text-[#1D1C1D]' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-800'
+                            }`}
+                            title="Add reaction"
+                          >
+                            <SmilePlus className="w-4 h-4" />
+                          </button>
+
+                          {activeToolbarReactionPickerId === msg.id && (
+                            <>
+                              <div 
+                                className="fixed inset-0 z-[70]" 
+                                onClick={(e) => { e.stopPropagation(); setActiveToolbarReactionPickerId(null); }}
+                              />
+                              <div className="absolute right-0 bottom-6 bg-white border border-[#E8E8E8] rounded-xl shadow-slack-popover p-2 z-[85] animate-in fade-in zoom-in-95 duration-100 flex gap-1 w-52 flex-wrap max-h-24 overflow-y-auto">
+                                {['👍', '🔥', '🎉', '😂', '😮', '😢', '🙏', '❤️', '✅', '👀', '🚀', '💯'].map(emoji => (
+                                  <button
+                                    key={emoji}
+                                    type="button"
+                                    onClick={() => {
+                                      onToggleReaction(msg.id, emoji);
+                                      setActiveToolbarReactionPickerId(null);
+                                    }}
+                                    className="w-7 h-7 text-sm hover:bg-slate-100 rounded flex items-center justify-center transition-colors cursor-pointer active:scale-90"
+                                  >
+                                    {emoji}
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
+
+                        {/* Reply in thread button */}
                         <button 
-                          onClick={() => setActiveToolbarReactionPickerId(activeToolbarReactionPickerId === msg.id ? null : msg.id)}
-                          className={`p-1 rounded animate-in zoom-in-95 duration-100 cursor-pointer ${
-                            activeToolbarReactionPickerId === msg.id ? 'bg-slate-100 text-[#1D1C1D]' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-800'
-                          }`}
-                          title="Add reaction"
+                          onClick={() => onOpenThread(msg.id)}
+                          className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-slate-800 animate-in zoom-in-95 duration-100 cursor-pointer" 
+                          title="Reply in thread"
                         >
-                          <SmilePlus className="w-4 h-4" />
+                          <MessageSquare className="w-4 h-4" />
                         </button>
 
-                        {activeToolbarReactionPickerId === msg.id && (
-                          <>
-                            <div 
-                              className="fixed inset-0 z-[70]" 
-                              onClick={(e) => { e.stopPropagation(); setActiveToolbarReactionPickerId(null); }}
-                            />
-                            <div className="absolute right-0 bottom-6 bg-white border border-[#E8E8E8] rounded-xl shadow-slack-popover p-2 z-[85] animate-in fade-in zoom-in-95 duration-100 flex gap-1 w-52 flex-wrap max-h-24 overflow-y-auto">
-                              {['👍', '🔥', '🎉', '😂', '😮', '😢', '🙏', '❤️', '✅', '👀', '🚀', '💯'].map(emoji => (
-                                <button
-                                  key={emoji}
-                                  type="button"
-                                  onClick={() => {
-                                    onToggleReaction(msg.id, emoji);
-                                    setActiveToolbarReactionPickerId(null);
-                                  }}
-                                  className="w-7 h-7 text-sm hover:bg-slate-100 rounded flex items-center justify-center transition-colors cursor-pointer active:scale-90"
-                                >
-                                  {emoji}
-                                </button>
-                              ))}
-                            </div>
-                          </>
-                        )}
-                      </div>
-
-                      {/* Reply in thread button */}
-                      <button 
-                        onClick={() => onOpenThread(msg.id)}
-                        className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-slate-800 animate-in zoom-in-95 duration-100 cursor-pointer" 
-                        title="Reply in thread"
-                      >
-                        <MessageSquare className="w-4 h-4" />
-                      </button>
-
-                      {/* Bookmark message button */}
-                      <button 
-                        onClick={() => setBookmarks(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
-                        className={`p-1 hover:bg-slate-100 rounded animate-in zoom-in-95 duration-100 cursor-pointer ${
-                          bookmarks[msg.id] ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-slate-600'
-                        }`}
-                        title={bookmarks[msg.id] ? 'Remove bookmark' : 'Bookmark message'}
-                      >
-                        <Bookmark className={`w-4 h-4 ${bookmarks[msg.id] ? 'fill-amber-500' : ''}`} />
-                      </button>
-                      
-                      {/* More actions (3-dot menu) */}
-                      <div className="relative">
+                        {/* Bookmark message button */}
                         <button 
-                          onClick={() => setActiveMenuMessageId(activeMenuMessageId === msg.id ? null : msg.id)}
-                          className={`p-1 rounded animate-in zoom-in-95 duration-100 cursor-pointer ${
-                            activeMenuMessageId === msg.id ? 'bg-slate-200 text-[#1D1C1D]' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-800'
+                          onClick={() => setBookmarks(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
+                          className={`p-1 hover:bg-slate-100 rounded animate-in zoom-in-95 duration-100 cursor-pointer ${
+                            bookmarks[msg.id] ? 'text-amber-500 hover:text-amber-600' : 'text-slate-400 hover:text-slate-600'
                           }`}
-                          title="More actions"
+                          title={bookmarks[msg.id] ? 'Remove bookmark' : 'Bookmark message'}
                         >
-                          <MoreHorizontal className="w-4 h-4" />
+                          <Bookmark className={`w-4 h-4 ${bookmarks[msg.id] ? 'fill-amber-500' : ''}`} />
                         </button>
+                        
+                        {/* More actions (3-dot menu) */}
+                        <div className="relative">
+                          <button 
+                            onClick={() => setActiveMenuMessageId(activeMenuMessageId === msg.id ? null : msg.id)}
+                            className={`p-1 rounded animate-in zoom-in-95 duration-100 cursor-pointer ${
+                              activeMenuMessageId === msg.id ? 'bg-slate-200 text-[#1D1C1D]' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-800'
+                            }`}
+                            title="More actions"
+                          >
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
 
-                        {activeMenuMessageId === msg.id && (
-                          <>
-                            {/* Close backdrop */}
-                            <div 
-                              className="fixed inset-0 z-[30]" 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setActiveMenuMessageId(null);
-                              }}
-                            />
-                            
-                            {/* Dropdown Menu */}
-                            <div className="absolute right-0 mt-1 w-48 bg-white border border-[#E8E8E8] rounded-lg shadow-slack-popover py-1 z-[40] animate-in fade-in slide-in-from-top-1 duration-100 font-sans">
-                              {/* Edit Message option */}
-                              <button
-                                onClick={() => handleEditClick(msg)}
-                                className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer transition-colors"
-                              >
-                                <Edit className="w-3.5 h-3.5" />
-                                <span>Edit message</span>
-                              </button>
-
-                              {/* Pin / Unpin option */}
-                              {canTogglePin ? (
+                          {activeMenuMessageId === msg.id && (
+                            <>
+                              {/* Close backdrop */}
+                              <div 
+                                className="fixed inset-0 z-[30]" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveMenuMessageId(null);
+                                }}
+                              />
+                              
+                              {/* Dropdown Menu */}
+                              <div className="absolute right-0 mt-1 w-48 bg-white border border-[#E8E8E8] rounded-lg shadow-slack-popover py-1 z-[40] animate-in fade-in slide-in-from-top-1 duration-100 font-sans">
+                                {/* Edit Message option */}
                                 <button
-                                  onClick={() => {
-                                    if (onTogglePinMessage) onTogglePinMessage(msg.id);
-                                    setActiveMenuMessageId(null);
-                                  }}
-                                  className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer transition-colors border-t border-slate-100"
+                                  onClick={() => handleEditClick(msg)}
+                                  className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer transition-colors"
                                 >
-                                  <Pin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                                  <span>{msg.isPinned ? 'Unpin message' : 'Pin message'}</span>
+                                  <Edit className="w-3.5 h-3.5" />
+                                  <span>Edit message</span>
                                 </button>
-                              ) : null}
 
-                              {/* Delete Message option */}
-                              {canDelete ? (
-                                <button
-                                  onClick={() => {
-                                    setDeleteTargetMessageId(msg.id);
-                                    setActiveMenuMessageId(null);
-                                  }}
-                                  className="w-full px-3 py-2 text-left text-xs font-bold text-red-600 hover:bg-red-50 flex items-center gap-2 cursor-pointer transition-colors"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  <span>Delete message</span>
-                                </button>
-                              ) : (
-                                <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 border-t border-slate-100 select-none">
-                                  Only sender/creator can delete
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        )}
+                                {/* Pin / Unpin option */}
+                                {canTogglePin ? (
+                                  <button
+                                    onClick={() => {
+                                      if (onTogglePinMessage) onTogglePinMessage(msg.id);
+                                      setActiveMenuMessageId(null);
+                                    }}
+                                    className="w-full px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer transition-colors border-t border-slate-100"
+                                  >
+                                    <Pin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                                    <span>{msg.isPinned ? 'Unpin message' : 'Pin message'}</span>
+                                  </button>
+                                ) : null}
+
+                                {/* Delete Message option */}
+                                {canDelete ? (
+                                  <button
+                                    onClick={() => {
+                                      setDeleteTargetMessageId(msg.id);
+                                      setActiveMenuMessageId(null);
+                                    }}
+                                    className="w-full px-3 py-2 text-left text-xs font-bold text-red-600 hover:bg-red-50 flex items-center gap-2 cursor-pointer transition-colors"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Delete message</span>
+                                  </button>
+                                ) : (
+                                  <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 border-t border-slate-100 select-none">
+                                    Only sender/creator can delete
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     {isGrouped ? (
                       /* Grouped message layout - EXACT LEFT TEXT ALIGNMENT at 48px */
@@ -1663,7 +1666,18 @@ export default function ChatArea({
                         </div>
                         {/* Text aligns with standard message text column (exactly 12px margin) */}
                         <div className="flex-1 min-w-0 ml-3 text-[15px] text-[#1D1C1D] leading-relaxed font-sans flex flex-col">
-                          {editingMessageId === msg.id ? (
+                          {msg.deletedForEveryone ? (
+                            <div className="text-[15px] leading-relaxed select-none">
+                              <span className="text-slate-400 italic">
+                                {msg.deletedByAdmin ? 'This message was deleted by admin' : 'This message was deleted'}
+                              </span>
+                              {msg.deletedAtTime && (
+                                <span className="text-[11px] text-slate-400 ml-1.5 font-medium not-italic font-sans">
+                                  (Deleted at {msg.deletedAtTime})
+                                </span>
+                              )}
+                            </div>
+                          ) : editingMessageId === msg.id ? (
                             <div className="flex flex-col gap-1.5 mt-1 font-sans">
                               <textarea
                                 value={editText}
@@ -1732,14 +1746,25 @@ export default function ChatArea({
                               className="font-bold text-[15px] text-[#1D1C1D] hover:underline cursor-pointer flex items-center gap-1"
                             >
                               <span>{getCurrentName(msg.senderId, msg.senderName)}</span>
-                              {bookmarks[msg.id] && <Bookmark className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" title="Bookmarked message" />}
+                              {!msg.deletedForEveryone && bookmarks[msg.id] && <Bookmark className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" title="Bookmarked message" />}
                             </span>
                             <span className="text-[12px] text-[#616061] font-medium">
                               {msg.timestamp} {msg.isEdited && <span className="text-[9px] text-slate-400 font-bold ml-1 hover:underline cursor-help select-none" title="This message has been edited">(edited)</span>}
                             </span>
                           </div>
                           
-                          {editingMessageId === msg.id ? (
+                          {msg.deletedForEveryone ? (
+                            <div className="text-[15px] leading-relaxed select-none">
+                              <span className="text-slate-400 italic">
+                                {msg.deletedByAdmin ? 'This message was deleted by admin' : 'This message was deleted'}
+                              </span>
+                              {msg.deletedAtTime && (
+                                <span className="text-[11px] text-slate-400 ml-1.5 font-medium not-italic font-sans">
+                                  (Deleted at {msg.deletedAtTime})
+                                </span>
+                              )}
+                            </div>
+                          ) : editingMessageId === msg.id ? (
                             <div className="flex flex-col gap-1.5 mt-1 font-sans">
                               <textarea
                                 value={editText}
@@ -2174,70 +2199,103 @@ export default function ChatArea({
       </footer>
 
       {/* 4. CHAT DELETE CONFIRMATION POPUP MODAL */}
-      {deleteTargetMessageId && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 animate-in fade-in duration-100 font-sans" role="dialog" aria-modal="true">
-          <div className="fixed inset-0 bg-black/45 backdrop-blur-[2px]" onClick={() => !isDeleting && setDeleteTargetMessageId(null)}></div>
-          
-          <div className="relative w-full max-w-sm overflow-hidden bg-white rounded-2xl shadow-slack-modal border border-[#E8E8E8] transition-all duration-200 animate-in zoom-in-95">
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#E8E8E8] select-none">
-              <h2 className="text-[15px] font-extrabold text-[#1D1C1D] tracking-tight">
-                Delete message
-              </h2>
-              <button 
-                onClick={() => setDeleteTargetMessageId(null)} 
-                disabled={isDeleting}
-                className="p-1.5 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-50 shrink-0 cursor-pointer"
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Content */}
-            <div className="p-5 space-y-4">
-              <div className="p-3.5 bg-red-50 border border-red-200 text-red-700 text-xs font-semibold rounded-lg leading-normal flex items-start gap-2.5">
-                <span>⚠️</span>
-                <span>Are you sure you want to permanently delete this message? This action cannot be undone.</span>
+      {deleteTargetMessageId && (() => {
+        const deleteTargetMsg = activeMessages.find(m => m.id === deleteTargetMessageId);
+        const canDeleteForEveryone = deleteTargetMsg && (deleteTargetMsg.senderId === user?.uid || isCreator);
+        const isAdminDelete = deleteTargetMsg && (deleteTargetMsg.senderId !== user?.uid && isCreator);
+        
+        return (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 animate-in fade-in duration-100 font-sans" role="dialog" aria-modal="true">
+            <div className="fixed inset-0 bg-black/45 backdrop-blur-[2px]" onClick={() => !isDeleting && setDeleteTargetMessageId(null)}></div>
+            
+            <div className="relative w-full max-w-md overflow-hidden bg-white rounded-2xl shadow-slack-modal border border-[#E8E8E8] transition-all duration-200 animate-in zoom-in-95">
+              {/* Header */}
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#E8E8E8] select-none">
+                <h2 className="text-[15px] font-extrabold text-[#1D1C1D] tracking-tight">
+                  Delete message
+                </h2>
+                <button 
+                  onClick={() => setDeleteTargetMessageId(null)} 
+                  disabled={isDeleting}
+                  className="p-1.5 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-700 transition-colors disabled:opacity-50 shrink-0 cursor-pointer"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <p className="text-xs text-slate-500 select-none leading-relaxed">
-                Deleting this message will also permanently remove any associated file previews and files from the channel feed.
-              </p>
-            </div>
 
-            {/* Actions */}
-            <div className="px-5 py-3.5 bg-slate-50 border-t border-[#E8E8E8] flex justify-end gap-2 select-none">
-              <button
-                type="button"
-                onClick={() => setDeleteTargetMessageId(null)}
-                className="px-4 py-2 text-xs font-bold border border-slate-300 rounded-lg hover:bg-slate-100 text-slate-700 transition-all duration-100 cursor-pointer"
-                disabled={isDeleting}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  setIsDeleting(true);
-                  try {
-                    await onDeleteMessage(deleteTargetMessageId);
-                    setDeleteTargetMessageId(null);
-                  } catch (err) {
-                    alert(err.message || 'Failed to delete message.');
-                  } finally {
-                    setIsDeleting(false);
-                  }
-                }}
-                className="px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-all shadow-sm flex items-center gap-1.5 shrink-0 cursor-pointer"
-                disabled={isDeleting}
-              >
-                {isDeleting && <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin shrink-0" />}
-                <span>{isDeleting ? 'Deleting...' : 'Delete'}</span>
-              </button>
+              {/* Content */}
+              <div className="p-5 space-y-4">
+                <p className="text-xs text-slate-500 leading-relaxed select-none">
+                  Choose how you want to delete this message:
+                </p>
+                
+                <div className="flex flex-col gap-2">
+                  {canDeleteForEveryone && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setIsDeleting(true);
+                        try {
+                          await onDeleteMessage(deleteTargetMessageId, 'everyone');
+                          setDeleteTargetMessageId(null);
+                        } catch (err) {
+                          alert(err.message || 'Failed to delete message.');
+                        } finally {
+                          setIsDeleting(false);
+                        }
+                      }}
+                      className="w-full text-left px-4 py-3 border border-red-200 hover:bg-red-50 hover:border-red-300 rounded-xl transition-all duration-100 flex flex-col cursor-pointer active:scale-[0.99] disabled:opacity-50"
+                      disabled={isDeleting}
+                    >
+                      <span className="text-xs font-bold text-red-700">
+                        {isAdminDelete ? 'Delete for everyone (Admin delete)' : 'Delete for everyone'}
+                      </span>
+                      <span className="text-[10px] text-red-500 mt-0.5 font-medium leading-normal">
+                        This will replace the message content with a deleted placeholder for all members in the workspace.
+                      </span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsDeleting(true);
+                      try {
+                        await onDeleteMessage(deleteTargetMessageId, 'me');
+                        setDeleteTargetMessageId(null);
+                      } catch (err) {
+                        alert(err.message || 'Failed to delete message.');
+                      } finally {
+                        setIsDeleting(false);
+                      }
+                    }}
+                    className="w-full text-left px-4 py-3 border border-slate-200 hover:bg-slate-50 hover:border-slate-300 rounded-xl transition-all duration-100 flex flex-col cursor-pointer active:scale-[0.99] disabled:opacity-50"
+                    disabled={isDeleting}
+                  >
+                    <span className="text-xs font-bold text-slate-700">Delete for me</span>
+                    <span className="text-[10px] text-slate-500 mt-0.5 font-medium leading-normal">
+                      This message will be hidden from your feed only. Other members will still see it normally.
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="px-5 py-3.5 bg-slate-50 border-t border-[#E8E8E8] flex justify-end select-none">
+                <button
+                  type="button"
+                  onClick={() => setDeleteTargetMessageId(null)}
+                  className="px-4 py-2 text-xs font-bold border border-slate-300 rounded-lg hover:bg-slate-100 text-slate-700 transition-all duration-100 cursor-pointer"
+                  disabled={isDeleting}
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
     </div>
   );

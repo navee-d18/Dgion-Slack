@@ -55,12 +55,21 @@ service cloud.firestore {
 
     // 4. Messages Collection Rules
     match /messages/{messageId} {
-      allow create: if isSignedIn() && isMemberOfWorkspace(request.resource.data.workspaceId);
       allow read: if isSignedIn() && isMemberOfWorkspace(resource.data.workspaceId);
-      allow update, delete: if isSignedIn() && (
+      allow create: if isSignedIn() && isMemberOfWorkspace(request.resource.data.workspaceId);
+      allow update: if isSignedIn() && (
         // Sender of the message can edit/delete their own message
         (resource.data.senderId == request.auth.uid && isMemberOfWorkspace(resource.data.workspaceId))
         // Or the workspace creator can edit/delete any message inside the workspace
+        || isWorkspaceCreator(resource.data.workspaceId)
+        // OR any workspace member can update ONLY the deletedFor field (for "Delete for me")
+        || (
+          isMemberOfWorkspace(resource.data.workspaceId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deletedFor'])
+        )
+      );
+      allow delete: if isSignedIn() && (
+        (resource.data.senderId == request.auth.uid && isMemberOfWorkspace(resource.data.workspaceId))
         || isWorkspaceCreator(resource.data.workspaceId)
       );
     }

@@ -168,11 +168,17 @@ export default function PinnedPanel({
 
                       {/* Content Preview */}
                       <div className="text-[12.5px] text-slate-700 font-normal leading-relaxed line-clamp-3 break-words">
-                        {renderFormattedContent(msg.content, activeWorkspace.allWorkspaceMembers)}
+                        {msg.deletedForEveryone ? (
+                          <span className="text-slate-400 italic">
+                            {msg.deletedByAdmin ? 'This message was deleted by admin' : 'This message was deleted'}
+                          </span>
+                        ) : (
+                          renderFormattedContent(msg.content, activeWorkspace.allWorkspaceMembers)
+                        )}
                       </div>
 
                       {/* Attachment Badge Display */}
-                      {msg.file && (
+                      {!msg.deletedForEveryone && msg.file && (
                         <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white border border-slate-200 rounded-lg max-w-full min-w-0 shrink-0 self-start animate-in zoom-in-95 duration-100 select-none">
                           {isImage ? (
                             <ImageIcon className="w-3 h-3 text-[#1164A3] shrink-0" />

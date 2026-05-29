@@ -1398,26 +1398,104 @@ function SlackDashboard({ user, logout }) {
     }
   };
 
-  const handleDeleteMessage = async (messageId) => {
+  const handleDeleteMessage = async (messageId, deleteType = 'everyone') => {
     if (!activeWorkspaceId || !activeDestinationId || !user) return;
+
+    const now = new Date();
+    let hours = now.getHours();
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    const timeString = `${hours}:${minutes} ${ampm}`;
 
     if (isConfigured) {
       try {
-        await deleteDoc(doc(db, 'messages', messageId));
+        const messageDocRef = doc(db, 'messages', messageId);
+        
+        if (deleteType === 'me') {
+          await updateDoc(messageDocRef, {
+            deletedFor: arrayUnion(user.uid)
+          });
+        } else {
+          // Delete for everyone
+          const msgSnap = await getDoc(messageDocRef);
+          if (msgSnap.exists()) {
+            const msgData = msgSnap.data();
+            const isAdminDelete = msgData.senderId !== user.uid && activeWorkspace?.createdBy === user.uid;
+            
+            await updateDoc(messageDocRef, {
+              deletedForEveryone: true,
+              deletedByAdmin: isAdminDelete,
+              reactions: {},
+              file: null,
+              voiceRecording: null,
+              deletedAtTime: timeString
+            });
+
+            // Clean up unread notifications for this message
+            try {
+              const qNotif = query(collection(db, 'notifications'), where('messageId', '==', messageId));
+              const notifSnap = await getDocs(qNotif);
+              notifSnap.forEach(async (nDoc) => {
+                await deleteDoc(nDoc.ref);
+              });
+            } catch (err) {}
+          }
+        }
       } catch (err) {
-        console.error('Error deleting message:', err);
+        console.error('Error deleting message in Firestore:', err);
         throw err;
       }
     } else {
-      // Emulator LocalStorage deletion
+      // Emulator LocalStorage deletion / update
       const channelKey = `${activeWorkspaceId}-${activeDestinationId}`;
       setMessages(prev => {
         const list = prev[channelKey] || [];
+        const updatedList = list.map(m => {
+          if (m.id !== messageId) return m;
+          
+          if (deleteType === 'me') {
+            const currentDeletedFor = m.deletedFor || [];
+            return {
+              ...m,
+              deletedFor: [...currentDeletedFor, user.uid]
+            };
+          } else {
+            const isAdminDelete = m.senderId !== user.uid && activeWorkspace?.createdBy === user.uid;
+            return {
+              ...m,
+              deletedForEveryone: true,
+              deletedByAdmin: isAdminDelete,
+              reactions: {},
+              file: null,
+              voiceRecording: null,
+              deletedAtTime: timeString
+            };
+          }
+        });
+        
         return {
           ...prev,
-          [channelKey]: list.filter(m => m.id !== messageId)
+          [channelKey]: updatedList
         };
       });
+
+      // Emulator Notifications cleanup
+      if (deleteType === 'everyone') {
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('slack_notifications_user_')) {
+              const localData = JSON.parse(localStorage.getItem(key) || '[]');
+              const filtered = localData.filter(n => n.messageId !== messageId);
+              localStorage.setItem(key, JSON.stringify(filtered));
+            }
+          }
+          window.dispatchEvent(new Event('storage'));
+          window.dispatchEvent(new Event('slack_local_notifications_update'));
+        } catch (e) {}
+      }
     }
   };
 
@@ -2361,6 +2439,7 @@ function SlackDashboard({ user, logout }) {
         activeWorkspace={activeWorkspace}
         allMessages={messages}
         onJumpTo={handleSearchJumpTo}
+        user={user}
       />
 
       <InviteWorkspaceModal
