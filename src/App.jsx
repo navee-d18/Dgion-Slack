@@ -29,7 +29,8 @@ import {
   updateDoc, 
   setDoc,
   arrayUnion,
-  deleteDoc
+  deleteDoc,
+  runTransaction
 } from 'firebase/firestore';
 import { db, isConfigured } from './firebase';
 import { purgeAllDemoData } from './utils/dbCleanup';
@@ -829,6 +830,42 @@ function SlackDashboard({ user, logout }) {
     };
   }, [isConfigured, activeWorkspaceId, user]);
 
+  // 2b. Emulator localStorage messages sync
+  useEffect(() => {
+    if (isConfigured || !activeWorkspaceId || !activeDestinationId || !user) return;
+
+    const loadLocalMessages = () => {
+      const allMessages = JSON.parse(localStorage.getItem('slack_messages') || '[]');
+      const channelKey = `${activeWorkspaceId}-${activeDestinationId}`;
+      const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
+      
+      const filtered = allMessages.filter(m => {
+        if (m.workspaceId !== activeWorkspaceId) return false;
+        if (isDestinationDm) {
+          return m.conversationId === sharedConversationId;
+        } else {
+          return m.channelId === activeDestinationId;
+        }
+      });
+
+      setMessages(prev => ({
+        ...prev,
+        [channelKey]: filtered
+      }));
+      setMessagesLoading(false);
+    };
+
+    loadLocalMessages();
+
+    window.addEventListener('storage', loadLocalMessages);
+    window.addEventListener('slack_local_messages_update', loadLocalMessages);
+
+    return () => {
+      window.removeEventListener('storage', loadLocalMessages);
+      window.removeEventListener('slack_local_messages_update', loadLocalMessages);
+    };
+  }, [isConfigured, activeWorkspaceId, activeDestinationId, user, isDestinationDm]);
+
   // 3. Heartbeat Scheduler Loop (runs every 5 seconds)
   useEffect(() => {
     if (!user || !activeWorkspaceId) return;
@@ -851,7 +888,21 @@ function SlackDashboard({ user, logout }) {
         console.log('⏰ Triggering reminder:', rem);
         if (isConfigured) {
           try {
-            await updateDoc(doc(db, 'reminders', rem.id), { status: 'sent' });
+            let triggerSuccess = false;
+            // Atomic transaction to guarantee only ONE tab triggers the reminder
+            await runTransaction(db, async (transaction) => {
+              const remDoc = await transaction.get(doc(db, 'reminders', rem.id));
+              if (remDoc.exists() && remDoc.data().status === 'pending') {
+                transaction.update(doc(db, 'reminders', rem.id), { status: 'sent' });
+                triggerSuccess = true;
+              }
+            });
+
+            if (!triggerSuccess) {
+              console.log('Reminder already triggered by another session/tab.');
+              continue;
+            }
+
             const notificationData = {
               workspaceId: activeWorkspaceId,
               userId: user.uid,
@@ -863,16 +914,42 @@ function SlackDashboard({ user, logout }) {
               destinationId: rem.destinationId,
               isDestinationDm: rem.isDestinationDm || false,
               messageId: rem.id,
+              isRead: false,
               createdAt: serverTimestamp()
             };
             await addDoc(collection(db, 'notifications'), notificationData);
+
+            // Find and update the Slackbot confirmation message in the messages collection
+            const qMsg = query(
+              collection(db, 'messages'),
+              where('workspaceId', '==', activeWorkspaceId),
+              where('reminderId', '==', rem.id)
+            );
+            const msgSnap = await getDocs(qMsg);
+            msgSnap.forEach(async (mDoc) => {
+              await updateDoc(mDoc.ref, { content: '✅ Reminder delivered' });
+            });
           } catch (err) {
             console.error('Error triggering Firestore reminder:', err);
           }
         } else {
           try {
+            let triggerSuccess = false;
+            // Atomic check in synchronous localStorage block
             const allReminders = JSON.parse(localStorage.getItem('slack_reminders') || '[]');
-            const updated = allReminders.map(r => r.id === rem.id ? { ...r, status: 'sent' } : r);
+            const updated = allReminders.map(r => {
+              if (r.id === rem.id && r.status === 'pending') {
+                triggerSuccess = true;
+                return { ...r, status: 'sent' };
+              }
+              return r;
+            });
+
+            if (!triggerSuccess) {
+              console.log('Reminder already triggered by another session/tab (local).');
+              continue;
+            }
+
             localStorage.setItem('slack_reminders', JSON.stringify(updated));
 
             const localKey = `slack_notifications_user_${user.uid}`;
@@ -889,11 +966,20 @@ function SlackDashboard({ user, logout }) {
               destinationId: rem.destinationId,
               isDestinationDm: rem.isDestinationDm || false,
               messageId: rem.id,
+              isRead: false,
               createdAt: Date.now()
             });
             localStorage.setItem(localKey, JSON.stringify(localData));
 
+            // Find and update the corresponding Slackbot confirmation card and update its content
+            const allMessages = JSON.parse(localStorage.getItem('slack_messages') || '[]');
+            const updatedMessages = allMessages.map(m => 
+              m.reminderId === rem.id ? { ...m, content: '✅ Reminder delivered' } : m
+            );
+            localStorage.setItem('slack_messages', JSON.stringify(updatedMessages));
+
             window.dispatchEvent(new Event('storage'));
+            window.dispatchEvent(new Event('slack_local_messages_update'));
             window.dispatchEvent(new Event('slack_local_notifications_update'));
             window.dispatchEvent(new Event('slack_local_reminders_update'));
           } catch (e) {
@@ -938,7 +1024,7 @@ function SlackDashboard({ user, logout }) {
     };
 
     checkPendingJobs();
-    const interval = setInterval(checkPendingJobs, 5000);
+    const interval = setInterval(checkPendingJobs, 1000);
     return () => clearInterval(interval);
   }, [user, activeWorkspaceId, scheduledMessages, reminders, isConfigured]);
 
@@ -1189,11 +1275,41 @@ function SlackDashboard({ user, logout }) {
     }
   };
 
+  const handleMarkNotificationAsRead = async (notificationId) => {
+    if (!notificationId || !user) return;
+
+    if (isConfigured) {
+      try {
+        await updateDoc(doc(db, 'notifications', notificationId), { isRead: true });
+      } catch (err) {
+        console.error('Error marking specific notification as read:', err);
+      }
+    } else {
+      // LocalStorage emulation
+      const localKey = `slack_notifications_user_${user.uid}`;
+      const localNotifications = JSON.parse(localStorage.getItem(localKey) || '[]');
+      let updated = false;
+      const updatedList = localNotifications.map(n => {
+        if (n.id === notificationId && !n.isRead) {
+          updated = true;
+          return { ...n, isRead: true };
+        }
+        return n;
+      });
+
+      if (updated) {
+        localStorage.setItem(localKey, JSON.stringify(updatedList));
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('slack_local_notifications_update'));
+      }
+    }
+  };
+
   // Auto-clear active destination notifications instantly
   useEffect(() => {
     if (activeWorkspaceId && activeDestinationId && unreadNotifications.length > 0) {
       const hasActiveUnreads = unreadNotifications.some(
-        n => n.workspaceId === activeWorkspaceId && n.destinationId === activeDestinationId
+        n => n.workspaceId === activeWorkspaceId && n.destinationId === activeDestinationId && n.type !== 'reminder'
       );
       if (hasActiveUnreads) {
         handleMarkAsRead(activeDestinationId, activeWorkspaceId);
@@ -1504,11 +1620,13 @@ function SlackDashboard({ user, logout }) {
       const newMsgId = `msg-${Date.now()}`;
       const newMessage = {
         id: newMsgId,
+        workspaceId: activeWorkspaceId,
         senderId: user.uid,
         senderName: user.name,
+        avatar: user.avatarInitials,
         content: content,
         timestamp: timeString,
-        avatar: user.avatarInitials
+        createdAt: Date.now()
       };
 
       if (parentMessageId) {
@@ -1519,10 +1637,19 @@ function SlackDashboard({ user, logout }) {
         newMessage.file = fileAttachment;
       }
 
-      setMessages(prev => ({
-        ...prev,
-        [channelKey]: [...(prev[channelKey] || []), newMessage]
-      }));
+      if (isDestinationDm) {
+        const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
+        newMessage.conversationId = sharedConversationId;
+        newMessage.receiverId = activeDestinationId;
+        newMessage.channelId = activeDestinationId;
+      } else {
+        newMessage.channelId = activeDestinationId;
+      }
+
+      const allMessages = JSON.parse(localStorage.getItem('slack_messages') || '[]');
+      allMessages.push(newMessage);
+      localStorage.setItem('slack_messages', JSON.stringify(allMessages));
+      window.dispatchEvent(new Event('slack_local_messages_update'));
 
       // ========================================================
       // 1.2. GENERATE EMULATOR REALTIME NOTIFICATIONS
@@ -1647,8 +1774,42 @@ function SlackDashboard({ user, logout }) {
     }
   };
 
+  const formatReminderTimeHelper = (ts) => {
+    if (!ts) return '';
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    const now = new Date();
+    
+    const timeString = d.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+    
+    const today = new Date();
+    const tomorrow = new Date();
+    tomorrow.setDate(today.getDate() + 1);
+    
+    if (d.toDateString() === today.toDateString()) {
+      return `Today ${timeString}`;
+    } else if (d.toDateString() === tomorrow.toDateString()) {
+      return `Tomorrow ${timeString}`;
+    } else {
+      const month = d.toLocaleDateString('en-US', { month: 'short' });
+      const day = d.getDate();
+      return `${month} ${day} at ${timeString}`;
+    }
+  };
+
   const handleScheduleReminder = async (text, scheduledAt) => {
     if (!activeWorkspaceId || !activeDestinationId || !user) return;
+
+    const now = new Date();
+    let hours = now.getHours();
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    const timeString = `${hours}:${minutes} ${ampm}`;
 
     const reminderData = {
       workspaceId: activeWorkspaceId,
@@ -1663,11 +1824,36 @@ function SlackDashboard({ user, logout }) {
 
     if (isConfigured) {
       try {
-        await addDoc(collection(db, 'reminders'), {
+        const reminderRef = await addDoc(collection(db, 'reminders'), {
           ...reminderData,
           scheduledAt: new Date(scheduledAt),
           createdAt: serverTimestamp()
         });
+
+        // Write persistent Slackbot confirmation message
+        const messageData = {
+          workspaceId: activeWorkspaceId,
+          senderId: 'slackbot',
+          senderName: 'Slackbot',
+          avatar: 'SB',
+          content: `📅 Reminder set for ${formatReminderTimeHelper(scheduledAt)}: "${text}"`,
+          timestamp: timeString,
+          createdAt: serverTimestamp(),
+          isEphemeral: true,
+          createdBy: user.uid,
+          reminderId: reminderRef.id
+        };
+
+        if (isDestinationDm) {
+          const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
+          messageData.conversationId = sharedConversationId;
+          messageData.receiverId = activeDestinationId;
+          messageData.channelId = activeDestinationId;
+        } else {
+          messageData.channelId = activeDestinationId;
+        }
+
+        await addDoc(collection(db, 'messages'), messageData);
       } catch (err) {
         console.error('Error writing reminder to Firestore:', err);
       }
@@ -1681,6 +1867,36 @@ function SlackDashboard({ user, logout }) {
         allReminders.push(newItem);
         localStorage.setItem('slack_reminders', JSON.stringify(allReminders));
 
+        // Write persistent local emulator Slackbot confirmation message
+        const allMessages = JSON.parse(localStorage.getItem('slack_messages') || '[]');
+        const localMsg = {
+          id: `msg-ephem-${Date.now()}-${Math.random()}`,
+          workspaceId: activeWorkspaceId,
+          senderId: 'slackbot',
+          senderName: 'Slackbot',
+          avatar: 'SB',
+          content: `📅 Reminder set for ${formatReminderTimeHelper(scheduledAt)}: "${text}"`,
+          timestamp: timeString,
+          createdAt: Date.now(),
+          isEphemeral: true,
+          createdBy: user.uid,
+          reminderId: newItem.id
+        };
+
+        if (isDestinationDm) {
+          const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
+          localMsg.conversationId = sharedConversationId;
+          localMsg.receiverId = activeDestinationId;
+          localMsg.channelId = activeDestinationId;
+        } else {
+          localMsg.channelId = activeDestinationId;
+        }
+
+        allMessages.push(localMsg);
+        localStorage.setItem('slack_messages', JSON.stringify(allMessages));
+
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('slack_local_messages_update'));
         window.dispatchEvent(new Event('slack_local_reminders_update'));
       } catch (e) {
         console.error('Error writing local reminder:', e);
@@ -1739,37 +1955,31 @@ function SlackDashboard({ user, logout }) {
       }
     } else {
       // Emulator LocalStorage deletion / update
-      const channelKey = `${activeWorkspaceId}-${activeDestinationId}`;
-      setMessages(prev => {
-        const list = prev[channelKey] || [];
-        const updatedList = list.map(m => {
-          if (m.id !== messageId) return m;
-          
-          if (deleteType === 'me') {
-            const currentDeletedFor = m.deletedFor || [];
-            return {
-              ...m,
-              deletedFor: [...currentDeletedFor, user.uid]
-            };
-          } else {
-            const isAdminDelete = m.senderId !== user.uid && activeWorkspace?.createdBy === user.uid;
-            return {
-              ...m,
-              deletedForEveryone: true,
-              deletedByAdmin: isAdminDelete,
-              reactions: {},
-              file: null,
-              voiceRecording: null,
-              deletedAtTime: timeString
-            };
-          }
-        });
+      const allMessages = JSON.parse(localStorage.getItem('slack_messages') || '[]');
+      const updated = allMessages.map(m => {
+        if (m.id !== messageId) return m;
         
-        return {
-          ...prev,
-          [channelKey]: updatedList
-        };
+        if (deleteType === 'me') {
+          const currentDeletedFor = m.deletedFor || [];
+          return {
+            ...m,
+            deletedFor: [...currentDeletedFor, user.uid]
+          };
+        } else {
+          const isAdminDelete = m.senderId !== user.uid && activeWorkspace?.createdBy === user.uid;
+          return {
+            ...m,
+            deletedForEveryone: true,
+            deletedByAdmin: isAdminDelete,
+            reactions: {},
+            file: null,
+            voiceRecording: null,
+            deletedAtTime: timeString
+          };
+        }
       });
+      localStorage.setItem('slack_messages', JSON.stringify(updated));
+      window.dispatchEvent(new Event('slack_local_messages_update'));
 
       // Emulator Notifications cleanup
       if (deleteType === 'everyone') {
@@ -1804,14 +2014,10 @@ function SlackDashboard({ user, logout }) {
       }
     } else {
       // Emulator LocalStorage editing
-      const channelKey = `${activeWorkspaceId}-${activeDestinationId}`;
-      setMessages(prev => {
-        const list = prev[channelKey] || [];
-        return {
-          ...prev,
-          [channelKey]: list.map(m => m.id === messageId ? { ...m, content: newContent, isEdited: true } : m)
-        };
-      });
+      const allMessages = JSON.parse(localStorage.getItem('slack_messages') || '[]');
+      const updated = allMessages.map(m => m.id === messageId ? { ...m, content: newContent, isEdited: true } : m);
+      localStorage.setItem('slack_messages', JSON.stringify(updated));
+      window.dispatchEvent(new Event('slack_local_messages_update'));
     }
   };
 
@@ -1843,13 +2049,10 @@ function SlackDashboard({ user, logout }) {
       }
     } else {
       // Emulator LocalStorage pinning
-      setMessages(prev => {
-        const list = prev[channelKey] || [];
-        return {
-          ...prev,
-          [channelKey]: list.map(m => m.id === messageId ? { ...m, isPinned: !isPinned } : m)
-        };
-      });
+      const allMessages = JSON.parse(localStorage.getItem('slack_messages') || '[]');
+      const updated = allMessages.map(m => m.id === messageId ? { ...m, isPinned: !isPinned } : m);
+      localStorage.setItem('slack_messages', JSON.stringify(updated));
+      window.dispatchEvent(new Event('slack_local_messages_update'));
     }
   };
 
@@ -1886,31 +2089,27 @@ function SlackDashboard({ user, logout }) {
       }
     } else {
       // Emulator LocalStorage reaction toggling
-      const channelKey = `${activeWorkspaceId}-${activeDestinationId}`;
-      setMessages(prev => {
-        const list = prev[channelKey] || [];
-        return {
-          ...prev,
-          [channelKey]: list.map(m => {
-            if (m.id !== messageId) return m;
-            const reactions = m.reactions || {};
-            const users = reactions[emoji] || [];
-            let newUsers;
-            if (users.includes(user.uid)) {
-              newUsers = users.filter(uid => uid !== user.uid);
-            } else {
-              newUsers = [...users, user.uid];
-            }
-            const newReactions = { ...reactions };
-            if (newUsers.length === 0) {
-              delete newReactions[emoji];
-            } else {
-              newReactions[emoji] = newUsers;
-            }
-            return { ...m, reactions: newReactions };
-          })
-        };
+      const allMessages = JSON.parse(localStorage.getItem('slack_messages') || '[]');
+      const updated = allMessages.map(m => {
+        if (m.id !== messageId) return m;
+        const reactions = m.reactions || {};
+        const users = reactions[emoji] || [];
+        let newUsers;
+        if (users.includes(user.uid)) {
+          newUsers = users.filter(uid => uid !== user.uid);
+        } else {
+          newUsers = [...users, user.uid];
+        }
+        const newReactions = { ...reactions };
+        if (newUsers.length === 0) {
+          delete newReactions[emoji];
+        } else {
+          newReactions[emoji] = newUsers;
+        }
+        return { ...m, reactions: newReactions };
       });
+      localStorage.setItem('slack_messages', JSON.stringify(updated));
+      window.dispatchEvent(new Event('slack_local_messages_update'));
     }
   };
 
@@ -2646,6 +2845,7 @@ function SlackDashboard({ user, logout }) {
               }
             });
           }}
+          onMarkNotificationAsRead={handleMarkNotificationAsRead}
           activeTypers={activeTypers}
           onTypingStart={handleTypingStart}
           onTypingStop={handleTypingStop}

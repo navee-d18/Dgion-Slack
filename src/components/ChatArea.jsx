@@ -106,110 +106,103 @@ export const parseReminderCommand = (text) => {
   
   const now = new Date();
   let scheduledAt = null;
-  let reminderText = '';
   
-  // 1. Check for "on YYYY-MM-DD at H:MM AM/PM" or similar
-  const onDateRegex = /on\s+(\d{4}-\d{2}-\d{2})(?:\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?/i;
-  const onMatch = rest.match(onDateRegex);
-  if (onMatch) {
-    const dateStr = onMatch[1];
-    let hr = onMatch[2] ? parseInt(onMatch[2], 10) : 9;
-    let min = onMatch[3] ? parseInt(onMatch[3], 10) : 0;
-    const ampm = onMatch[4] ? onMatch[4].toLowerCase() : '';
-    
-    if (ampm === 'pm' && hr < 12) hr += 12;
-    if (ampm === 'am' && hr === 12) hr = 0;
-    
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const targetDate = new Date(year, month - 1, day, hr, min, 0, 0);
-    scheduledAt = targetDate.getTime();
-    reminderText = rest.replace(onDateRegex, '').trim();
-  }
-  
-  // 2. Check for "in X mins/hours/secs"
-  if (!scheduledAt) {
-    const inRegex = /in\s+(\d+)\s*(min|minute|hour|hr|second|sec)s?/i;
-    const inMatch = rest.match(inRegex);
-    if (inMatch) {
-      const amount = parseInt(inMatch[1], 10);
-      const unit = inMatch[2].toLowerCase();
-      let ms = amount * 1000;
-      if (unit.startsWith('min')) {
-        ms = amount * 60 * 1000;
-      } else if (unit.startsWith('hour') || unit.startsWith('hr')) {
-        ms = amount * 60 * 60 * 1000;
-      }
-      scheduledAt = Date.now() + ms;
-      reminderText = rest.replace(inRegex, '').trim();
+  // 1. Check for relative duration: "in X mins/hours/secs"
+  const inRegex = /\bin\s+(\d+)\s*(min|minute|hour|hr|second|sec)s?\b/i;
+  const inMatch = rest.match(inRegex);
+  if (inMatch) {
+    const amount = parseInt(inMatch[1], 10);
+    const unit = inMatch[2].toLowerCase();
+    let ms = amount * 1000;
+    if (unit.startsWith('min')) {
+      ms = amount * 60 * 1000;
+    } else if (unit.startsWith('hour') || unit.startsWith('hr')) {
+      ms = amount * 60 * 60 * 1000;
     }
-  }
-  
-  // 3. Check for "tomorrow at H:MM AM/PM" or just "tomorrow"
-  if (!scheduledAt) {
-    const tomorrowRegex = /tomorrow(?:\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?/i;
-    const tomorrowMatch = rest.match(tomorrowRegex);
-    if (tomorrowMatch) {
-      let hr = tomorrowMatch[1] ? parseInt(tomorrowMatch[1], 10) : 9;
-      let min = tomorrowMatch[2] ? parseInt(tomorrowMatch[2], 10) : 0;
-      const ampm = tomorrowMatch[3] ? tomorrowMatch[3].toLowerCase() : '';
-      
-      if (ampm === 'pm' && hr < 12) hr += 12;
-      if (ampm === 'am' && hr === 12) hr = 0;
-      
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      tomorrow.setHours(hr, min, 0, 0);
-      scheduledAt = tomorrow.getTime();
-      reminderText = rest.replace(tomorrowRegex, '').trim();
-    }
-  }
-  
-  // 4. Check for "at H:MM AM/PM" or just "at H AM/PM"
-  if (!scheduledAt) {
-    const atRegex = /at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i;
-    const atMatch = rest.match(atRegex);
-    if (atMatch) {
-      let hr = parseInt(atMatch[1], 10);
-      let min = atMatch[2] ? parseInt(atMatch[2], 10) : 0;
-      const ampm = atMatch[3] ? atMatch[3].toLowerCase() : '';
-      
-      if (ampm) {
-        if (ampm === 'pm' && hr < 12) hr += 12;
-        if (ampm === 'am' && hr === 12) hr = 0;
-      } else {
-        if (hr < 12 && now.getHours() > hr) {
-          hr += 12;
-        }
-      }
-      
-      const targetDate = new Date();
-      targetDate.setHours(hr, min, 0, 0);
-      
-      if (targetDate.getTime() <= now.getTime()) {
-        targetDate.setDate(targetDate.getDate() + 1);
-      }
-      
-      scheduledAt = targetDate.getTime();
-      reminderText = rest.replace(atRegex, '').trim();
-    }
-  }
-  
-  if (!scheduledAt) {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(9, 0, 0, 0);
-    scheduledAt = tomorrow.getTime();
-    reminderText = rest;
-  }
-  
-  if (scheduledAt) {
+    scheduledAt = Date.now() + ms;
+    let reminderText = rest.replace(inRegex, '').trim();
+    // Strip leading/trailing 'at' or 'to' or 'that'
+    reminderText = reminderText.replace(/^\s*(at|to|that)\s+/i, '').trim();
+    reminderText = reminderText.replace(/\s+(at|to)$/i, '').trim();
     return {
       text: reminderText || 'Reminder',
       scheduledAt: scheduledAt
     };
   }
+
+  // 2. Determine target date (default to today)
+  const hasTomorrow = /\btomorrow\b/i.test(rest);
   
-  return null;
+  const targetDate = new Date();
+  if (hasTomorrow) {
+    targetDate.setDate(targetDate.getDate() + 1);
+  }
+  
+  // Clean date keywords to get core message and time
+  let tempText = rest
+    .replace(/\btoday\b/gi, '')
+    .replace(/\btomorrow\b/gi, '')
+    .trim();
+
+  // Find the time match
+  let hour = null;
+  let minute = 0;
+  let matchedString = '';
+
+  // Try Candidate 1: \b(\d{1,2}):(\d{2})\s*(am|pm)?\b
+  const c1Regex = /\b(\d{1,2}):(\d{2})\s*(am|pm)?\b/i;
+  const m1 = tempText.match(c1Regex);
+  if (m1) {
+    hour = parseInt(m1[1], 10);
+    minute = parseInt(m1[2], 10);
+    matchedString = m1[0];
+    const ampm = m1[3] ? m1[3].toLowerCase() : '';
+    if (ampm === 'pm' && hour < 12) hour += 12;
+    if (ampm === 'am' && hour === 12) hour = 0;
+  } else {
+    // Try Candidate 2: \b(\d{1,2})\s*(am|pm)\b
+    const c2Regex = /\b(\d{1,2})\s*(am|pm)\b/i;
+    const m2 = tempText.match(c2Regex);
+    if (m2) {
+      hour = parseInt(m2[1], 10);
+      matchedString = m2[0];
+      const ampm = m2[2].toLowerCase();
+      if (ampm === 'pm' && hour < 12) hour += 12;
+      if (ampm === 'am' && hour === 12) hour = 0;
+    } else {
+      // Try Candidate 3: \b(?:at\s+)(\d{1,2})\b
+      const c3Regex = /\b(?:at\s+)(\d{1,2})\b/i;
+      const m3 = tempText.match(c3Regex);
+      if (m3) {
+        hour = parseInt(m3[1], 10);
+        matchedString = m3[0];
+      }
+    }
+  }
+
+  if (hour !== null) {
+    targetDate.setHours(hour, minute, 0, 0);
+    let reminderText = tempText.replace(matchedString, '').trim();
+    // remove helper words like 'at', 'to' at the beginning/end
+    reminderText = reminderText.replace(/^\s*(at|to|that)\s+/i, '').trim();
+    reminderText = reminderText.replace(/\s+(at|to)$/i, '').trim();
+
+    return {
+      text: reminderText || 'Reminder',
+      scheduledAt: targetDate.getTime()
+    };
+  }
+
+  // Fallback to 9:00 AM
+  targetDate.setHours(9, 0, 0, 0);
+  let reminderText = tempText;
+  reminderText = reminderText.replace(/^\s*(at|to|that)\s+/i, '').trim();
+  reminderText = reminderText.replace(/\s+(at|to)$/i, '').trim();
+
+  return {
+    text: reminderText || 'Reminder',
+    scheduledAt: targetDate.getTime()
+  };
 };
 
 // Inline Markdown Parser to convert simple formatting tokens to HTML
@@ -528,6 +521,7 @@ export default function ChatArea({
   unreadNotifications = [],
   onJumpTo,
   onMarkAllAsRead,
+  onMarkNotificationAsRead,
   activeTypers = [],
   onTypingStart,
   onTypingStop,
@@ -1143,17 +1137,6 @@ export default function ChatArea({
       const parsed = parseReminderCommand(inputText);
       if (parsed) {
         onScheduleReminder(parsed.text, parsed.scheduledAt);
-        const ephemeralMsg = {
-          id: `ephem-${Date.now()}-${Math.random()}`,
-          senderId: 'slackbot',
-          senderName: 'Slackbot',
-          avatar: 'SB',
-          content: `📅 I will remind you "${parsed.text}" ${formatReminderTime(parsed.scheduledAt)}`,
-          isEphemeral: true,
-          createdAt: Date.now(),
-          destinationId: activeDestinationId
-        };
-        setEphemeralMessages(prev => [...prev, ephemeralMsg]);
       } else {
         const ephemeralError = {
           id: `ephem-err-${Date.now()}`,
@@ -1592,6 +1575,9 @@ export default function ChatArea({
                                 notif.workspaceId,
                                 notif.parentMessageId || null
                               );
+                              if (typeof onMarkNotificationAsRead === 'function') {
+                                onMarkNotificationAsRead(notif.id);
+                              }
                               setShowNotificationsDropdown(false);
                             }}
                             className="w-full p-3 hover:bg-slate-50 flex items-start gap-2.5 text-left transition-colors cursor-pointer group/notif-row"
@@ -1698,7 +1684,7 @@ export default function ChatArea({
         <div className="space-y-[3px]">
           {(() => {
             const mainMessages = [
-              ...activeMessages.filter(m => !m.parentMessageId && !(m.deletedFor && m.deletedFor.includes(user?.uid))),
+              ...activeMessages.filter(m => !m.parentMessageId && !(m.deletedFor && m.deletedFor.includes(user?.uid)) && (!m.isEphemeral || m.createdBy === user?.uid)),
               ...ephemeralMessages.filter(m => m.destinationId === activeDestinationId && !m.parentMessageId)
             ].sort((a, b) => {
               const timeA = a.createdAt ? (typeof a.createdAt.toDate === 'function' ? a.createdAt.toDate().getTime() : new Date(a.createdAt).getTime()) : 0;
@@ -2295,6 +2281,20 @@ export default function ChatArea({
                   </button>
                 </div>
               )}
+              {inputText.trim().startsWith('/remind') && (() => {
+                const parsed = parseReminderCommand(inputText);
+                if (parsed) {
+                  return (
+                    <div className="mx-3.5 mt-3.5 px-3 py-2.5 bg-indigo-50 border border-indigo-200 rounded-lg flex items-center justify-between text-xs font-semibold text-indigo-800 animate-in fade-in slide-in-from-top-1 duration-100 select-none shadow-sm shrink-0">
+                      <span className="flex items-center gap-1.5">
+                        <span>📅</span>
+                        <span>Reminder set for <b>{formatReminderTime(parsed.scheduledAt)}</b>: "{parsed.text}"</span>
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               <textarea
                 ref={textareaRef}
