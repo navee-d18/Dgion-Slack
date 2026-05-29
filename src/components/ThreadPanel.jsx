@@ -93,6 +93,40 @@ const formatReminderTime = (ts) => {
   }
 };
 
+const getTodayDateString = () => {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const getNextNearestSlot = () => {
+  const d = new Date();
+  let min = d.getMinutes();
+  const rem = min % 5;
+  d.setMinutes(min + (5 - rem), 0, 0);
+  
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  
+  return {
+    dateStr: `${yyyy}-${mm}-${dd}`,
+    timeStr: `${hh}:${mi}`
+  };
+};
+
+const getMinTime = () => {
+  const d = new Date();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mi}`;
+};
+
 // Fuzzy Markdown formatting parser
 const renderFormattedContent = (content) => {
   if (!content) return '';
@@ -403,6 +437,24 @@ export default function ThreadPanel({
   const [scheduledTime, setScheduledTime] = useState(null);
   const [customDate, setCustomDate] = useState('');
   const [customTime, setCustomTime] = useState('');
+
+  // Default values when scheduler popover opens
+  useEffect(() => {
+    if (showSchedulerPopover) {
+      const slot = getNextNearestSlot();
+      setCustomDate(slot.dateStr);
+      setCustomTime(slot.timeStr);
+    }
+  }, [showSchedulerPopover]);
+
+  // Compute live validation state of custom input
+  const isScheduleInvalid = React.useMemo(() => {
+    if (!customDate || !customTime) return false;
+    const [year, month, day] = customDate.split('-').map(Number);
+    const [hour, min] = customTime.split(':').map(Number);
+    const target = new Date(year, month - 1, day, hour, min, 0, 0);
+    return isNaN(target.getTime()) || target.getTime() <= Date.now();
+  }, [customDate, customTime]);
   const [attachment, setAttachment] = useState(null);
   const [activeAudioId, setActiveAudioId] = useState(null);
 
@@ -1472,14 +1524,21 @@ export default function ThreadPanel({
                         type="date"
                         value={customDate}
                         onChange={(e) => setCustomDate(e.target.value)}
+                        min={getTodayDateString()}
                         className="w-full px-2 py-1 text-[10px] border border-slate-350 rounded bg-white font-bold text-slate-750 focus:outline-none focus:ring-1 focus:ring-[#1164A3] focus:border-[#1164A3]"
                       />
                       <input
                         type="time"
                         value={customTime}
                         onChange={(e) => setCustomTime(e.target.value)}
+                        min={customDate === getTodayDateString() ? getMinTime() : undefined}
                         className="w-full px-2 py-1 text-[10px] border border-slate-355 rounded bg-white font-bold text-slate-750 focus:outline-none focus:ring-1 focus:ring-[#1164A3] focus:border-[#1164A3]"
                       />
+                      {isScheduleInvalid && (
+                        <span className="text-[9.5px] font-black text-red-500 text-center animate-pulse">
+                          ⚠️ Please choose a future date and time
+                        </span>
+                      )}
                       <button
                         type="button"
                         disabled={!customDate || !customTime}
@@ -1487,8 +1546,8 @@ export default function ThreadPanel({
                           const [year, month, day] = customDate.split('-').map(Number);
                           const [hour, min] = customTime.split(':').map(Number);
                           const target = new Date(year, month - 1, day, hour, min, 0, 0);
-                          if (target.getTime() <= Date.now()) {
-                            alert("Please select a future time!");
+                          if (isNaN(target.getTime()) || target.getTime() <= Date.now()) {
+                            alert("Please choose a future date and time");
                             return;
                           }
                           setScheduledTime(target.getTime());
