@@ -6,7 +6,7 @@ export default function PinnedPanel({
   activeWorkspace,
   activeDestinationId,
   isDestinationDm,
-  messages,
+  pinnedMessages = [],
   onClose,
   onJumpTo,
   onTogglePinMessage,
@@ -16,12 +16,8 @@ export default function PinnedPanel({
 
   const isCreator = activeWorkspace.createdBy === currentUser?.uid;
 
-  // 1. Get all messages inside the active channel/DM
-  const channelKey = `${activeWorkspace.id}-${activeDestinationId}`;
-  const activeMessages = messages[channelKey] || [];
-
-  // 2. Filter only pinned messages
-  const pinnedMsgs = activeMessages.filter(msg => msg.isPinned);
+  // Pinned messages are passed in pre-filtered (full set, pagination-independent).
+  const pinnedMsgs = pinnedMessages;
 
   const getAvatarColorClass = (name) => {
     const colors = [

@@ -17,16 +17,18 @@ import { playNotificationSound } from './utils/audio';
 
 // Firebase Firestore Hooks
 import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  addDoc, 
-  serverTimestamp, 
-  doc, 
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  onSnapshot,
+  addDoc,
+  serverTimestamp,
+  doc,
   getDoc,
   getDocs,
-  updateDoc, 
+  updateDoc,
   setDoc,
   arrayUnion,
   deleteDoc,
@@ -54,6 +56,14 @@ function SlackDashboard({ user, logout }) {
   
   const [messages, setMessages] = useState(INITIAL_MESSAGES);
   const [allRegisteredUsers, setAllRegisteredUsers] = useState([]);
+
+  // Message pagination: load the latest page, grow the window on "load older".
+  const MESSAGE_PAGE_SIZE = 30;
+  const [messageLimit, setMessageLimit] = useState(MESSAGE_PAGE_SIZE);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
+  // Pinned messages are fetched separately (full set) so pagination doesn't hide them.
+  const [pinnedMessages, setPinnedMessages] = useState([]);
 
   const latestUsersRef = useRef(allRegisteredUsers);
   useEffect(() => {
@@ -414,13 +424,24 @@ function SlackDashboard({ user, logout }) {
       reportActive(false);
     };
 
+    // mousemove fires dozens of times per second; throttle it so reportActive
+    // isn't invoked on every pixel of movement. The DB write is already capped,
+    // but the per-event work + idle-timer churn is pure waste otherwise.
+    let lastMoveAt = 0;
+    const handleMouseMove = () => {
+      const now = Date.now();
+      if (now - lastMoveAt < 1500) return;
+      lastMoveAt = now;
+      reportActive(false);
+    };
+
     const handleKeyboardActivity = (e) => {
       const isTyping = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable;
       reportActive(isTyping);
     };
 
     window.addEventListener('focus', handleActivity);
-    document.addEventListener('mousemove', handleActivity);
+    document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('keydown', handleKeyboardActivity);
     document.addEventListener('mousedown', handleActivity);
     document.addEventListener('touchstart', handleActivity);
@@ -446,7 +467,7 @@ function SlackDashboard({ user, logout }) {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
 
       window.removeEventListener('focus', handleActivity);
-      document.removeEventListener('mousemove', handleActivity);
+      document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('keydown', handleKeyboardActivity);
       document.removeEventListener('mousedown', handleActivity);
       document.removeEventListener('touchstart', handleActivity);
@@ -499,8 +520,12 @@ function SlackDashboard({ user, logout }) {
   useEffect(() => {
     if (activeWorkspaceId && activeDestinationId && user) {
       setMessagesLoading(true);
+      // Reset the pagination window whenever the open conversation changes.
+      setMessageLimit(MESSAGE_PAGE_SIZE);
+      setHasMoreMessages(false);
+      setPinnedMessages([]);
     }
-  }, [activeWorkspaceId, activeDestinationId, user]);
+  }, [activeWorkspaceId, activeDestinationId, isDestinationDm, user]);
 
   // ========================================================
   // 5. REAL-TIME OBSERVER: MESSAGES
@@ -510,31 +535,41 @@ function SlackDashboard({ user, logout }) {
 
     let q;
     if (isDestinationDm) {
-      // Direct message query: watch the shared conversation ID
+      // Direct message query: watch the shared conversation ID (latest page only)
       const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
       q = query(
         collection(db, 'messages'),
         where('workspaceId', '==', activeWorkspaceId),
-        where('conversationId', '==', sharedConversationId)
+        where('conversationId', '==', sharedConversationId),
+        orderBy('createdAt', 'desc'),
+        limit(messageLimit)
       );
     } else {
-      // Channel message query: watch the channel ID
+      // Channel message query: watch the channel ID (latest page only)
       q = query(
         collection(db, 'messages'),
         where('workspaceId', '==', activeWorkspaceId),
-        where('channelId', '==', activeDestinationId)
+        where('channelId', '==', activeDestinationId),
+        orderBy('createdAt', 'desc'),
+        limit(messageLimit)
       );
     }
 
     let isInitial = true;
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      // A full page back from the server means older messages may still exist.
+      setHasMoreMessages(snapshot.size === messageLimit);
+      setLoadingMoreMessages(false);
+
       const fetchedMessages = [];
       snapshot.forEach((doc) => {
-        fetchedMessages.push({ id: doc.id, ...doc.data() });
+        // Use estimated server timestamps so a just-sent message (pending write)
+        // still sorts correctly instead of briefly jumping to the top.
+        fetchedMessages.push({ id: doc.id, ...doc.data({ serverTimestamps: 'estimate' }) });
       });
 
-      // Client-side chronological sort to completely bypass compound index constraints
+      // Query returns newest-first; sort ascending for display (oldest at top).
       const sortedMessages = fetchedMessages.sort((a, b) => {
         const timeA = a.createdAt?.seconds || a.createdAt?.toMillis?.() || 0;
         const timeB = b.createdAt?.seconds || b.createdAt?.toMillis?.() || 0;
@@ -560,10 +595,48 @@ function SlackDashboard({ user, logout }) {
       console.warn('Messages observer error:', err);
       setSyncError('Database rules block read access or disconnected.');
       setMessagesLoading(false);
+      setLoadingMoreMessages(false);
     });
 
     return () => unsubscribe();
-  }, [activeWorkspaceId, activeDestinationId, user, isDestinationDm, notifications]);
+  }, [activeWorkspaceId, activeDestinationId, user, isDestinationDm, notifications, messageLimit]);
+
+  // ========================================================
+  // 5.05. REAL-TIME OBSERVER: PINNED MESSAGES (full set, pagination-independent)
+  // ========================================================
+  useEffect(() => {
+    if (!isConfigured || !activeWorkspaceId || !activeDestinationId || !user) return;
+
+    let q;
+    if (isDestinationDm) {
+      const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
+      q = query(
+        collection(db, 'messages'),
+        where('workspaceId', '==', activeWorkspaceId),
+        where('conversationId', '==', sharedConversationId),
+        where('isPinned', '==', true)
+      );
+    } else {
+      q = query(
+        collection(db, 'messages'),
+        where('workspaceId', '==', activeWorkspaceId),
+        where('channelId', '==', activeDestinationId),
+        where('isPinned', '==', true)
+      );
+    }
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const pins = [];
+      snapshot.forEach((docSnap) => {
+        pins.push({ id: docSnap.id, ...docSnap.data({ serverTimestamps: 'estimate' }) });
+      });
+      setPinnedMessages(pins);
+    }, (err) => {
+      console.warn('Pinned messages observer error:', err);
+    });
+
+    return () => unsubscribe();
+  }, [activeWorkspaceId, activeDestinationId, user, isDestinationDm]);
 
   // ========================================================
   // 5.5. REAL-TIME OBSERVER: NOTIFICATIONS (FIRESTORE MODE)
@@ -853,13 +926,25 @@ function SlackDashboard({ user, logout }) {
         } else {
           return m.channelId === activeDestinationId;
         }
+      }).sort((a, b) => {
+        const timeA = a.createdAt?.seconds || (typeof a.createdAt === 'number' ? a.createdAt : 0);
+        const timeB = b.createdAt?.seconds || (typeof b.createdAt === 'number' ? b.createdAt : 0);
+        return timeA - timeB;
       });
+
+      // Pinned messages come from the full set, independent of pagination.
+      setPinnedMessages(filtered.filter(m => m.isPinned));
+
+      // Mirror Firestore pagination: keep only the most recent `messageLimit`.
+      setHasMoreMessages(filtered.length > messageLimit);
+      const paged = filtered.slice(-messageLimit);
 
       setMessages(prev => ({
         ...prev,
-        [channelKey]: filtered
+        [channelKey]: paged
       }));
       setMessagesLoading(false);
+      setLoadingMoreMessages(false);
     };
 
     loadLocalMessages();
@@ -871,7 +956,14 @@ function SlackDashboard({ user, logout }) {
       window.removeEventListener('storage', loadLocalMessages);
       window.removeEventListener('slack_local_messages_update', loadLocalMessages);
     };
-  }, [isConfigured, activeWorkspaceId, activeDestinationId, user, isDestinationDm]);
+  }, [isConfigured, activeWorkspaceId, activeDestinationId, user, isDestinationDm, messageLimit]);
+
+  // Grow the message window by one page (loads older messages).
+  const handleLoadMoreMessages = () => {
+    if (loadingMoreMessages || !hasMoreMessages) return;
+    setLoadingMoreMessages(true);
+    setMessageLimit(prev => prev + MESSAGE_PAGE_SIZE);
+  };
 
   // 3. Heartbeat Scheduler Loop (runs every 5 seconds)
   useEffect(() => {
@@ -1031,7 +1123,10 @@ function SlackDashboard({ user, logout }) {
     };
 
     checkPendingJobs();
-    const interval = setInterval(checkPendingJobs, 1000);
+    // Poll every 15s instead of every 1s — scheduled messages/reminders fire
+    // minutes-to-hours out, so up to 15s of delivery latency is fine and this
+    // cuts the polling work ~15x. (Still client-side; see deferred Cloud Functions.)
+    const interval = setInterval(checkPendingJobs, 15000);
     return () => clearInterval(interval);
   }, [user, activeWorkspaceId, scheduledMessages, reminders, isConfigured]);
 
@@ -2824,6 +2919,10 @@ function SlackDashboard({ user, logout }) {
           isDestinationDm={isDestinationDm}
           messages={messages}
           messagesLoading={messagesLoading}
+          hasMoreMessages={hasMoreMessages}
+          loadingMoreMessages={loadingMoreMessages}
+          onLoadMoreMessages={handleLoadMoreMessages}
+          pinnedMessages={pinnedMessages}
           onSendMessage={handleSendMessage}
           onDeleteMessage={handleDeleteMessage}
           onEditMessage={handleEditMessage}
@@ -2907,7 +3006,7 @@ function SlackDashboard({ user, logout }) {
             activeWorkspace={activeWorkspace}
             activeDestinationId={activeDestinationId}
             isDestinationDm={isDestinationDm}
-            messages={messages}
+            pinnedMessages={pinnedMessages}
             onClose={() => setPinnedPanelOpen(false)}
             onJumpTo={handleSearchJumpTo}
             onTogglePinMessage={handleTogglePinMessage}
@@ -3033,8 +3132,36 @@ function SlackDashboard({ user, logout }) {
   );
 }
 
+function ConfigErrorScreen() {
+  return (
+    <div className="min-h-screen w-screen flex flex-col items-center justify-center bg-white font-sans px-6 text-center select-none">
+      <div className="max-w-md">
+        <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-5">
+          <span className="text-2xl font-black text-red-600">!</span>
+        </div>
+        <h1 className="text-xl font-black text-[#1D1C1D] mb-2">App not configured</h1>
+        <p className="text-sm text-[#616061] leading-relaxed">
+          Firebase environment variables are missing for this production build.
+          The app cannot start without a valid Firebase configuration.
+        </p>
+        <p className="text-xs text-slate-400 mt-4 leading-relaxed">
+          Set the <code className="font-mono">VITE_FIREBASE_*</code> variables (see
+          <code className="font-mono"> .env.example</code>) and rebuild.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { user, loading: authLoading, logout } = useAuth();
+
+  // Production safety: never silently fall back to the localStorage emulation in a
+  // prod build — it persists plaintext passwords. A missing config here is a hard
+  // misconfiguration, so surface it instead of degrading to emulation mode.
+  if (import.meta.env.PROD && !isConfigured) {
+    return <ConfigErrorScreen />;
+  }
 
   if (authLoading) {
     return (

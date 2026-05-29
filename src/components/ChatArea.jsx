@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { 
   Hash, Lock, Search, Users, Menu, Send, Bold, Italic, 
   Strikethrough, Code, Link, Paperclip, Smile, HelpCircle, 
@@ -536,6 +536,10 @@ export default function ChatArea({
   isDestinationDm,
   messages,
   messagesLoading,
+  hasMoreMessages = false,
+  loadingMoreMessages = false,
+  onLoadMoreMessages,
+  pinnedMessages = [],
   onSendMessage,
   onDeleteMessage,
   onEditMessage,
@@ -596,7 +600,8 @@ export default function ChatArea({
 
   const channelKey = activeWorkspace ? `${activeWorkspace.id}-${activeDestinationId}` : '';
   const activeMessages = messages[channelKey] || [];
-  const pinnedCount = activeMessages.filter(m => m.isPinned).length;
+  // Full pin count comes from the dedicated pinned query, not the paginated window.
+  const pinnedCount = pinnedMessages.length;
 
   // Rich Composer states
   const [showLinkModal, setShowLinkModal] = useState(false);
@@ -852,8 +857,26 @@ export default function ChatArea({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  useEffect(() => {
-    if (!highlightedMessageId) {
+  // When loading older messages we prepend to the top, so preserve the user's
+  // scroll position instead of jumping to the bottom.
+  const isRestoringScrollRef = useRef(false);
+  const prevScrollHeightRef = useRef(0);
+
+  const handleLoadMoreClick = () => {
+    if (containerRef.current) {
+      prevScrollHeightRef.current = containerRef.current.scrollHeight;
+      isRestoringScrollRef.current = true;
+    }
+    onLoadMoreMessages?.();
+  };
+
+  useLayoutEffect(() => {
+    if (isRestoringScrollRef.current && containerRef.current) {
+      // Keep the viewport anchored after older messages are prepended.
+      const delta = containerRef.current.scrollHeight - prevScrollHeightRef.current;
+      containerRef.current.scrollTop += delta;
+      isRestoringScrollRef.current = false;
+    } else if (!highlightedMessageId) {
       scrollToBottom();
     }
   }, [activeMessages.length, activeDestinationId]);
@@ -1744,18 +1767,38 @@ export default function ChatArea({
             <span className="text-[12px] text-[#616061] font-bold">Syncing conversations...</span>
           </div>
         )}
-        {/* Welcome Header */}
-        <div className="border-b border-[#E8E8E8] pb-5 mb-5 select-none animate-in fade-in duration-200">
-          <div className="w-12 h-12 bg-[#522653] text-white flex items-center justify-center font-bold rounded-lg text-lg mb-3 shadow-sm">
-            {isDestinationDm ? getInitials(destinationName) : '#'}
+        {/* Load older messages OR start-of-history header */}
+        {hasMoreMessages ? (
+          <div className="flex justify-center py-3 select-none">
+            <button
+              onClick={handleLoadMoreClick}
+              disabled={loadingMoreMessages}
+              className="flex items-center gap-2 px-4 py-1.5 text-[13px] font-bold text-[#1164A3] hover:bg-[#1164A3]/10 rounded-full border border-[#1164A3]/30 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-default"
+            >
+              {loadingMoreMessages ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                  Loading older messages…
+                </>
+              ) : (
+                'Load older messages'
+              )}
+            </button>
           </div>
-          <h2 className="text-xl font-extrabold text-[#1D1C1D] tracking-tight">
-            This is the start of the {isDestinationDm ? `direct message history with ${destinationName}` : `#${destinationName} channel`}
-          </h2>
-          <p className="text-[14px] text-[#616061] mt-1.5 leading-relaxed max-w-3xl">
-            {destinationDesc} Use this space to exchange ideas, post updates, and collaborate.
-          </p>
-        </div>
+        ) : (
+          /* Welcome Header */
+          <div className="border-b border-[#E8E8E8] pb-5 mb-5 select-none animate-in fade-in duration-200">
+            <div className="w-12 h-12 bg-[#522653] text-white flex items-center justify-center font-bold rounded-lg text-lg mb-3 shadow-sm">
+              {isDestinationDm ? getInitials(destinationName) : '#'}
+            </div>
+            <h2 className="text-xl font-extrabold text-[#1D1C1D] tracking-tight">
+              This is the start of the {isDestinationDm ? `direct message history with ${destinationName}` : `#${destinationName} channel`}
+            </h2>
+            <p className="text-[14px] text-[#616061] mt-1.5 leading-relaxed max-w-3xl">
+              {destinationDesc} Use this space to exchange ideas, post updates, and collaborate.
+            </p>
+          </div>
+        )}
 
         {/* Message Log Stack */}
         <div className="space-y-[3px]">
