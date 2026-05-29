@@ -1478,31 +1478,39 @@ export function PreferencesModal({
             <span className="block text-[12px] font-bold text-[#1D1C1D] uppercase tracking-wider select-none">
               Theme Mode
             </span>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-4">
               <button
                 type="button"
                 onClick={() => setLocalTheme('light')}
-                className={`py-3 px-4 border rounded-xl font-bold text-sm transition-all flex flex-col items-center gap-1.5 cursor-pointer ${
+                className={`h-[92px] px-4 border rounded-xl font-bold text-sm transition-all flex flex-col items-center justify-center gap-2 cursor-pointer outline-none select-none ${
                   localTheme === 'light'
-                    ? 'border-[#1164A3] bg-blue-50/20 text-[#1164A3] ring-2 ring-[#1164A3]/15'
+                    ? 'border-[#1164A3] bg-blue-50/15 text-[#1164A3] ring-2 ring-[#1164A3]/15'
                     : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                <span className="w-4 h-4 rounded-full border border-slate-300 bg-white" />
-                <span>Light Theme</span>
+                <span className={`w-4.5 h-4.5 rounded-full border flex items-center justify-center transition-all ${
+                  localTheme === 'light' ? 'border-[#1164A3] bg-white' : 'border-slate-300 bg-white'
+                }`}>
+                  {localTheme === 'light' && <span className="w-2.5 h-2.5 rounded-full bg-[#1164A3]" />}
+                </span>
+                <span className="text-center truncate">Light Theme</span>
               </button>
               
               <button
                 type="button"
                 onClick={() => setLocalTheme('dark')}
-                className={`py-3 px-4 border rounded-xl font-bold text-sm transition-all flex flex-col items-center gap-1.5 cursor-pointer ${
+                className={`h-[92px] px-4 border rounded-xl font-bold text-sm transition-all flex flex-col items-center justify-center gap-2 cursor-pointer outline-none select-none ${
                   localTheme === 'dark'
-                    ? 'border-[#1164A3] bg-blue-50/20 text-[#1164A3] ring-2 ring-[#1164A3]/15'
+                    ? 'border-[#1164A3] bg-blue-50/15 text-[#1164A3] ring-2 ring-[#1164A3]/15'
                     : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                <span className="w-4 h-4 rounded-full border border-slate-600 bg-slate-900" />
-                <span>Dark Theme</span>
+                <span className={`w-4.5 h-4.5 rounded-full border flex items-center justify-center transition-all ${
+                  localTheme === 'dark' ? 'border-[#1164A3] bg-white' : 'border-slate-300 bg-white'
+                }`}>
+                  {localTheme === 'dark' && <span className="w-2.5 h-2.5 rounded-full bg-[#1164A3]" />}
+                </span>
+                <span className="text-center truncate">Dark Theme</span>
               </button>
             </div>
           </div>
@@ -1522,15 +1530,15 @@ export function PreferencesModal({
             <button
               type="button"
               onClick={() => setLocalNotifications(localNotifications === 'on' ? 'off' : 'on')}
-              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                localNotifications === 'on' ? 'bg-[#1164A3]' : 'bg-slate-200'
+              className={`relative w-[48px] h-[28px] shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none border-none select-none hover:brightness-[1.08] active:scale-[0.98] ${
+                localNotifications === 'on' ? 'bg-[#1264A3]' : 'bg-[#334155]'
               }`}
               role="switch"
               aria-checked={localNotifications === 'on'}
             >
               <span
-                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                  localNotifications === 'on' ? 'translate-x-5' : 'translate-x-0'
+                className={`pointer-events-none absolute top-[3px] w-[22px] h-[22px] rounded-full shadow-sm transition-all duration-200 ease-in-out ${
+                  localNotifications === 'on' ? 'left-[23px] bg-white' : 'left-[3px] bg-[#F8FAFC]'
                 }`}
               />
             </button>
@@ -1549,32 +1557,32 @@ export function PreferencesModal({
             <button
               type="button"
               onClick={() => setLocalCompactMode(!localCompactMode)}
-              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                localCompactMode ? 'bg-[#1164A3]' : 'bg-slate-200'
+              className={`relative w-[48px] h-[28px] shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out focus:outline-none border-none select-none hover:brightness-[1.08] active:scale-[0.98] ${
+                localCompactMode ? 'bg-[#1264A3]' : 'bg-[#334155]'
               }`}
               role="switch"
               aria-checked={localCompactMode}
             >
               <span
-                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                  localCompactMode ? 'translate-x-5' : 'translate-x-0'
+                className={`pointer-events-none absolute top-[3px] w-[22px] h-[22px] rounded-full shadow-sm transition-all duration-200 ease-in-out ${
+                  localCompactMode ? 'left-[23px] bg-white' : 'left-[3px] bg-[#F8FAFC]'
                 }`}
               />
             </button>
           </div>
 
           {/* Actions */}
-          <div className="flex justify-end gap-2 pt-2 border-t border-[#E8E8E8] select-none">
+          <div className="flex justify-end items-center gap-2.5 pt-4 border-t border-[#E8E8E8] select-none">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm font-bold border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-700 transition-colors"
+              className="h-[40px] px-4 text-sm font-bold border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-700 transition-all flex items-center justify-center active:scale-[0.98] cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-sm font-bold text-white bg-[#1164A3] hover:bg-[#1164A3]/90 rounded-lg transition-colors shadow-sm cursor-pointer"
+              className="h-[40px] px-5 text-sm font-bold text-white bg-[#1164A3] hover:bg-[#1164A3]/90 rounded-lg transition-all shadow-sm active:scale-[0.98] flex items-center justify-center cursor-pointer"
             >
               Save Preferences
             </button>
