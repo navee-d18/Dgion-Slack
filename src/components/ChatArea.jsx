@@ -1620,7 +1620,7 @@ export default function ChatArea({
       
       {/* 1. TOP HEADER - TALLER, CLEAN WHITE, TIGHTER SPACING, #E8E8E8 border */}
       <header className="h-[52px] bg-[#FFFFFF] border-b border-[#E8E8E8] px-3 sm:px-6 flex items-center justify-between gap-2 shrink-0 select-none">
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
           <button
             onClick={onOpenMobileDrawer}
             className="p-1.5 hover:bg-slate-100 rounded text-slate-700 sm:hidden shrink-0"
@@ -1630,7 +1630,7 @@ export default function ChatArea({
           </button>
 
           <div className="flex flex-col min-w-0">
-            <h1 className="text-[16px] font-bold text-[#1D1C1D] flex items-center gap-1 leading-tight tracking-tight">
+            <h1 className="text-[16px] font-bold text-[#1D1C1D] flex items-center gap-1 leading-tight tracking-tight min-w-0">
               {!isDestinationDm ? (
                 isPrivate ? (
                   <Lock className="w-4 h-4 text-[#1D1C1D] shrink-0" />
@@ -1645,13 +1645,13 @@ export default function ChatArea({
               {isDestinationDm ? (
                 <button
                   onClick={() => onOpenProfile && onOpenProfile(activeDestinationId)}
-                  className="truncate text-left hover:underline cursor-pointer font-bold flex items-center focus:outline-none"
+                  className="truncate text-left hover:underline cursor-pointer font-bold flex items-center min-w-0 focus:outline-none"
                   title="View user profile"
                 >
-                  <span className="truncate">{destinationName}</span>
+                  <span className="truncate" title={destinationName}>{destinationName}</span>
                 </button>
               ) : (
-                <span className="truncate">{destinationName}</span>
+                <span className="truncate" title={destinationName}>{destinationName}</span>
               )}
               {!isDestinationDm && activeChannel && isCreator && (
                 <button
@@ -1671,14 +1671,14 @@ export default function ChatArea({
         </div>
 
         {/* Header Search Shortcuts */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={onOpenSearch}
-            className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-[#E8E8E8] hover:border-slate-300 rounded-md text-[12px] text-[#616061] font-medium transition-all w-28 sm:w-52 text-left"
+            className="flex items-center justify-center sm:justify-start gap-2 px-2 sm:px-3 py-1.5 bg-slate-50 hover:bg-slate-100 border border-[#E8E8E8] hover:border-slate-300 rounded-md text-[12px] text-[#616061] font-medium transition-all w-9 sm:w-32 md:w-40 lg:w-56 text-left shrink-0"
             title="Search channels and messages"
           >
             <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            <span className="truncate opacity-75">Search messages...</span>
+            <span className="truncate opacity-75 hidden sm:inline">Search messages...</span>
           </button>
 
           {/* Notifications Bell Button */}
