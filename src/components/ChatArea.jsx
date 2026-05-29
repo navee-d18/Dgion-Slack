@@ -1328,21 +1328,46 @@ export default function ChatArea({
   };
 
   useEffect(() => {
-    if (highlightedMessageId && messageRefs.current[highlightedMessageId]) {
-      setTimeout(() => {
-        messageRefs.current[highlightedMessageId].scrollIntoView({ 
+    if (!highlightedMessageId) return;
+
+    let attempts = 0;
+    const tryScroll = () => {
+      // Find the message element by id or reminderId
+      const targetElement = Object.entries(messageRefs.current).find(([id, el]) => {
+        if (!el) return false;
+        if (id === highlightedMessageId) return true;
+        const msg = activeMessages.find(m => m.id === id);
+        return msg && msg.reminderId === highlightedMessageId;
+      })?.[1];
+
+      if (targetElement) {
+        targetElement.scrollIntoView({ 
           behavior: 'smooth', 
           block: 'center' 
         });
         
         const timer = setTimeout(() => {
           if (clearHighlight) clearHighlight();
-        }, 3000);
+        }, 2000);
         
-        return () => clearTimeout(timer);
-      }, 200);
-    }
-  }, [highlightedMessageId, activeMessages]);
+        return true;
+      }
+      return false;
+    };
+
+    // Try immediately
+    if (tryScroll()) return;
+
+    // Retry periodically up to 3 seconds if messages are still loading or rendering
+    const interval = setInterval(() => {
+      attempts++;
+      if (tryScroll() || attempts > 30) {
+        clearInterval(interval);
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [highlightedMessageId, activeMessages, messagesLoading]);
 
   // 1. EMPTY STATE: NO WORKSPACE
   if (loading) {
@@ -1752,7 +1777,7 @@ export default function ChatArea({
               // Group messages only if same sender AND same calendar day AND within 5 minutes!
               const isCloseTogether = prevDate && (currentDate.getTime() - prevDate.getTime()) < 5 * 60 * 1000;
               const isGrouped = prevMsg && prevMsg.senderId === msg.senderId && !isNewDay && isCloseTogether && !msg.isEphemeral && !prevMsg.isEphemeral;
-              const isHighlighted = highlightedMessageId === msg.id;
+              const isHighlighted = highlightedMessageId && (highlightedMessageId === msg.id || highlightedMessageId === msg.reminderId);
 
               // Sender of this message is current user OR current user is workspace creator
               const canDelete = !msg.isEphemeral && (msg.senderId === user?.uid || isCreator);
@@ -1780,8 +1805,8 @@ export default function ChatArea({
 
                   <div
                     ref={el => messageRefs.current[msg.id] = el}
-                    className={`relative group flex items-start px-6 py-1 -mx-6 rounded transition-colors ${
-                      isHighlighted ? 'bg-yellow-50 border-l-[3px] border-yellow-400 pl-[21px]' : 'hover:bg-slate-50'
+                    className={`relative group flex items-start px-6 py-1 -mx-6 rounded border-l-[3px] pl-[21px] transition-all duration-[2000ms] ease-out ${
+                      isHighlighted ? 'bg-[#E8F5FA] border-[#36C5F0]' : 'border-transparent hover:bg-slate-50'
                     }`}
                   >
                     {/* Floating message toolbar */}
