@@ -68,6 +68,150 @@ const formatDateHeader = (date) => {
   }
 };
 
+
+export const formatReminderTime = (ts) => {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  const now = new Date();
+  
+  const timeString = d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+  
+  const today = new Date();
+  const tomorrow = new Date();
+  tomorrow.setDate(today.getDate() + 1);
+  
+  if (d.toDateString() === today.toDateString()) {
+    return `Today ${timeString}`;
+  } else if (d.toDateString() === tomorrow.toDateString()) {
+    return `Tomorrow ${timeString}`;
+  } else {
+    const month = d.toLocaleDateString('en-US', { month: 'short' });
+    const day = d.getDate();
+    return `${month} ${day} at ${timeString}`;
+  }
+};
+
+export const parseReminderCommand = (text) => {
+  let rest = text.trim();
+  if (!rest.toLowerCase().startsWith('/remind')) return null;
+  
+  rest = rest.substring(7).trim(); // remove "/remind"
+  if (rest.toLowerCase().startsWith('me ')) {
+    rest = rest.substring(3).trim(); // remove "me"
+  }
+  
+  const now = new Date();
+  let scheduledAt = null;
+  let reminderText = '';
+  
+  // 1. Check for "on YYYY-MM-DD at H:MM AM/PM" or similar
+  const onDateRegex = /on\s+(\d{4}-\d{2}-\d{2})(?:\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?/i;
+  const onMatch = rest.match(onDateRegex);
+  if (onMatch) {
+    const dateStr = onMatch[1];
+    let hr = onMatch[2] ? parseInt(onMatch[2], 10) : 9;
+    let min = onMatch[3] ? parseInt(onMatch[3], 10) : 0;
+    const ampm = onMatch[4] ? onMatch[4].toLowerCase() : '';
+    
+    if (ampm === 'pm' && hr < 12) hr += 12;
+    if (ampm === 'am' && hr === 12) hr = 0;
+    
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const targetDate = new Date(year, month - 1, day, hr, min, 0, 0);
+    scheduledAt = targetDate.getTime();
+    reminderText = rest.replace(onDateRegex, '').trim();
+  }
+  
+  // 2. Check for "in X mins/hours/secs"
+  if (!scheduledAt) {
+    const inRegex = /in\s+(\d+)\s*(min|minute|hour|hr|second|sec)s?/i;
+    const inMatch = rest.match(inRegex);
+    if (inMatch) {
+      const amount = parseInt(inMatch[1], 10);
+      const unit = inMatch[2].toLowerCase();
+      let ms = amount * 1000;
+      if (unit.startsWith('min')) {
+        ms = amount * 60 * 1000;
+      } else if (unit.startsWith('hour') || unit.startsWith('hr')) {
+        ms = amount * 60 * 60 * 1000;
+      }
+      scheduledAt = Date.now() + ms;
+      reminderText = rest.replace(inRegex, '').trim();
+    }
+  }
+  
+  // 3. Check for "tomorrow at H:MM AM/PM" or just "tomorrow"
+  if (!scheduledAt) {
+    const tomorrowRegex = /tomorrow(?:\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?/i;
+    const tomorrowMatch = rest.match(tomorrowRegex);
+    if (tomorrowMatch) {
+      let hr = tomorrowMatch[1] ? parseInt(tomorrowMatch[1], 10) : 9;
+      let min = tomorrowMatch[2] ? parseInt(tomorrowMatch[2], 10) : 0;
+      const ampm = tomorrowMatch[3] ? tomorrowMatch[3].toLowerCase() : '';
+      
+      if (ampm === 'pm' && hr < 12) hr += 12;
+      if (ampm === 'am' && hr === 12) hr = 0;
+      
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(hr, min, 0, 0);
+      scheduledAt = tomorrow.getTime();
+      reminderText = rest.replace(tomorrowRegex, '').trim();
+    }
+  }
+  
+  // 4. Check for "at H:MM AM/PM" or just "at H AM/PM"
+  if (!scheduledAt) {
+    const atRegex = /at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i;
+    const atMatch = rest.match(atRegex);
+    if (atMatch) {
+      let hr = parseInt(atMatch[1], 10);
+      let min = atMatch[2] ? parseInt(atMatch[2], 10) : 0;
+      const ampm = atMatch[3] ? atMatch[3].toLowerCase() : '';
+      
+      if (ampm) {
+        if (ampm === 'pm' && hr < 12) hr += 12;
+        if (ampm === 'am' && hr === 12) hr = 0;
+      } else {
+        if (hr < 12 && now.getHours() > hr) {
+          hr += 12;
+        }
+      }
+      
+      const targetDate = new Date();
+      targetDate.setHours(hr, min, 0, 0);
+      
+      if (targetDate.getTime() <= now.getTime()) {
+        targetDate.setDate(targetDate.getDate() + 1);
+      }
+      
+      scheduledAt = targetDate.getTime();
+      reminderText = rest.replace(atRegex, '').trim();
+    }
+  }
+  
+  if (!scheduledAt) {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    scheduledAt = tomorrow.getTime();
+    reminderText = rest;
+  }
+  
+  if (scheduledAt) {
+    return {
+      text: reminderText || 'Reminder',
+      scheduledAt: scheduledAt
+    };
+  }
+  
+  return null;
+};
+
 // Inline Markdown Parser to convert simple formatting tokens to HTML
 export const renderFormattedContent = (content, members = []) => {
   if (!content) return '';
@@ -393,7 +537,11 @@ export default function ChatArea({
   onOpenProfile,
   pinnedPanelOpen = false,
   onTogglePinnedPanel,
-  onTogglePinMessage
+  onTogglePinMessage,
+  scheduledMessages = [],
+  onScheduleMessage,
+  onCancelScheduledMessage,
+  onScheduleReminder
 }) {
   const { user, loading } = useAuth();
   const isCreator = activeWorkspace?.createdBy === user?.uid;
@@ -445,6 +593,13 @@ export default function ChatArea({
   const [micError, setMicError] = useState('');
   const [activeAudioId, setActiveAudioId] = useState(null);
   const [recordedBlob, setRecordedBlob] = useState(null);
+
+  // Scheduled Messages & Reminders states
+  const [showSchedulerPopover, setShowSchedulerPopover] = useState(false);
+  const [scheduledTime, setScheduledTime] = useState(null); // epoch milliseconds or null
+  const [customDate, setCustomDate] = useState('');
+  const [customTime, setCustomTime] = useState('');
+  const [ephemeralMessages, setEphemeralMessages] = useState([]);
 
   // Voice note / audio recording refs
   const mediaRecorderRef = useRef(null);
@@ -982,7 +1137,56 @@ export default function ChatArea({
 
   const handleSend = () => {
     if (!inputText.trim() && !attachment) return;
-    onSendMessage(inputText, attachment);
+
+    // 1. Intercept /remind slash commands
+    if (inputText.trim().startsWith('/remind')) {
+      const parsed = parseReminderCommand(inputText);
+      if (parsed) {
+        onScheduleReminder(parsed.text, parsed.scheduledAt);
+        const ephemeralMsg = {
+          id: `ephem-${Date.now()}-${Math.random()}`,
+          senderId: 'slackbot',
+          senderName: 'Slackbot',
+          avatar: 'SB',
+          content: `📅 I will remind you "${parsed.text}" ${formatReminderTime(parsed.scheduledAt)}`,
+          isEphemeral: true,
+          createdAt: Date.now(),
+          destinationId: activeDestinationId
+        };
+        setEphemeralMessages(prev => [...prev, ephemeralMsg]);
+      } else {
+        const ephemeralError = {
+          id: `ephem-err-${Date.now()}`,
+          senderId: 'slackbot',
+          senderName: 'Slackbot',
+          avatar: 'SB',
+          content: `❌ Sorry, I couldn't parse that command. Try:\n• \`/remind review docs tomorrow\`\n• \`/remind team meeting at 4 PM\`\n• \`/remind review docs in 5 mins\``,
+          isEphemeral: true,
+          createdAt: Date.now(),
+          destinationId: activeDestinationId
+        };
+        setEphemeralMessages(prev => [...prev, ephemeralError]);
+      }
+      setInputText('');
+      setAttachment(null);
+      setShowLinkModal(false);
+      setShowEmojiPicker(false);
+      setMentionQuery(null);
+      setMentionStartIndex(-1);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      setIsTypingState(false);
+      if (onTypingStop) onTypingStop();
+      return;
+    }
+
+    // 2. Intercept scheduled messages
+    if (scheduledTime) {
+      onScheduleMessage(inputText, attachment, null, scheduledTime);
+      setScheduledTime(null);
+    } else {
+      onSendMessage(inputText, attachment);
+    }
+
     setInputText('');
     setAttachment(null);
     setShowLinkModal(false);
@@ -1372,6 +1576,11 @@ export default function ChatArea({
                           hour12: true
                         });
 
+                        const isReminder = notif.type === 'reminder' || notif.senderName === 'Slackbot';
+                        const senderName = isReminder ? '🔔 Reminder' : notif.senderName;
+                        const initials = isReminder ? 'SB' : getInitials(notif.senderName || 'US');
+                        const avatarBg = isReminder ? 'bg-[#613064]' : getAvatarColorClass(notif.senderName || 'Unknown');
+
                         return (
                           <button
                             key={notif.id}
@@ -1388,26 +1597,32 @@ export default function ChatArea({
                             className="w-full p-3 hover:bg-slate-50 flex items-start gap-2.5 text-left transition-colors cursor-pointer group/notif-row"
                           >
                             {/* Avatar */}
-                            <div className={`w-7.5 h-7.5 rounded-full text-white font-extrabold flex items-center justify-center text-[10px] shrink-0 shadow-sm ${getAvatarColorClass(notif.senderName || 'Unknown')}`}>
-                              {getInitials(notif.senderName || 'US')}
+                            <div className={`w-7.5 h-7.5 rounded-full text-white font-extrabold flex items-center justify-center text-[10px] shrink-0 shadow-sm ${avatarBg}`}>
+                              {initials}
                             </div>
 
                             {/* Details */}
                             <div className="min-w-0 flex-1">
                               <div className="flex items-baseline justify-between select-none">
                                 <span className="text-xs font-bold text-[#1D1C1D] group-hover/notif-row:text-[#1164A3] transition-colors truncate pr-1">
-                                  {notif.senderName}
+                                  {senderName}
                                 </span>
                                 <span className="text-[9px] text-slate-400 font-semibold shrink-0">
                                   {timeString}
                                 </span>
                               </div>
-                              <p className="text-[10px] text-slate-500 font-bold mt-0.5 flex items-center gap-1 select-none">
-                                <span>{notif.type === 'mention' ? 'mentioned you in' : 'in'}</span>
-                                <span className="text-[#1164A3] truncate">
-                                  {notif.type === 'dm' ? 'Direct Message' : notif.type === 'invite' ? 'Invites' : `#${notif.destinationName}`}
-                                </span>
-                              </p>
+                              {isReminder ? (
+                                <p className="text-[10px] text-slate-500 font-bold mt-0.5 flex items-center gap-1 select-none">
+                                  <span>from Slackbot</span>
+                                </p>
+                              ) : (
+                                <p className="text-[10px] text-slate-500 font-bold mt-0.5 flex items-center gap-1 select-none">
+                                  <span>{notif.type === 'mention' ? 'mentioned you in' : 'in'}</span>
+                                  <span className="text-[#1164A3] truncate">
+                                    {notif.type === 'dm' ? 'Direct Message' : notif.type === 'invite' ? 'Invites' : `#${notif.destinationName}`}
+                                  </span>
+                                </p>
+                              )}
                               <p className="text-[11.5px] text-slate-700 font-normal truncate mt-1 leading-normal">
                                 {renderFormattedContent(notif.content, activeWorkspace?.allWorkspaceMembers)}
                               </p>
@@ -1482,7 +1697,14 @@ export default function ChatArea({
         {/* Message Log Stack */}
         <div className="space-y-[3px]">
           {(() => {
-            const mainMessages = activeMessages.filter(m => !m.parentMessageId && !(m.deletedFor && m.deletedFor.includes(user?.uid)));
+            const mainMessages = [
+              ...activeMessages.filter(m => !m.parentMessageId && !(m.deletedFor && m.deletedFor.includes(user?.uid))),
+              ...ephemeralMessages.filter(m => m.destinationId === activeDestinationId && !m.parentMessageId)
+            ].sort((a, b) => {
+              const timeA = a.createdAt ? (typeof a.createdAt.toDate === 'function' ? a.createdAt.toDate().getTime() : new Date(a.createdAt).getTime()) : 0;
+              const timeB = b.createdAt ? (typeof b.createdAt.toDate === 'function' ? b.createdAt.toDate().getTime() : new Date(b.createdAt).getTime()) : 0;
+              return timeA - timeB;
+            });
             return mainMessages.map((msg, index) => {
               const prevMsg = index > 0 ? mainMessages[index - 1] : null;
               const currentDate = getMessageDate(msg);
@@ -1491,12 +1713,12 @@ export default function ChatArea({
 
               // Group messages only if same sender AND same calendar day AND within 5 minutes!
               const isCloseTogether = prevDate && (currentDate.getTime() - prevDate.getTime()) < 5 * 60 * 1000;
-              const isGrouped = prevMsg && prevMsg.senderId === msg.senderId && !isNewDay && isCloseTogether;
+              const isGrouped = prevMsg && prevMsg.senderId === msg.senderId && !isNewDay && isCloseTogether && !msg.isEphemeral && !prevMsg.isEphemeral;
               const isHighlighted = highlightedMessageId === msg.id;
 
               // Sender of this message is current user OR current user is workspace creator
-              const canDelete = msg.senderId === user?.uid || isCreator;
-              const canTogglePin = msg.senderId === user?.uid || isCreator;
+              const canDelete = !msg.isEphemeral && (msg.senderId === user?.uid || isCreator);
+              const canTogglePin = !msg.isEphemeral && (msg.senderId === user?.uid || isCreator);
 
               return (
                 <div key={msg.id} className="flex flex-col animate-in fade-in duration-100">
@@ -1525,7 +1747,7 @@ export default function ChatArea({
                     }`}
                   >
                     {/* Floating message toolbar */}
-                    {!msg.deletedForEveryone && (
+                    {!msg.deletedForEveryone && !msg.isEphemeral && (
                       <div className={`absolute right-6 -top-3.5 ${activeMenuMessageId === msg.id || activeToolbarReactionPickerId === msg.id ? 'flex' : 'hidden group-hover:flex'} items-center gap-0.5 bg-white border border-[#E8E8E8] rounded-lg shadow-slack-popover p-0.5 z-[20] animate-in fade-in duration-75`}>
                         
                         {/* Add reaction button */}
@@ -1727,92 +1949,101 @@ export default function ChatArea({
                           {renderThreadIndicator(msg)}
                         </div>
                       </>
-                    ) : (
-                      /* Standard message layout */
-                      <>
-                        {/* Perfect Avatar Circle badge */}
-                        <div 
-                          onClick={() => onOpenProfile && onOpenProfile(msg.senderId)}
-                          className={`w-9 h-9 rounded-full text-white font-extrabold flex items-center justify-center text-sm shrink-0 shadow-sm transition-all duration-100 hover:scale-105 cursor-pointer ${getAvatarColorClass(getCurrentName(msg.senderId, msg.senderName))}`}
-                        >
-                          {getInitials(getCurrentName(msg.senderId, msg.senderName))}
-                        </div>
-                        
-                        {/* Content Block */}
-                        <div className="flex-1 min-w-0 ml-3 font-sans flex flex-col">
-                          <div className="flex items-baseline gap-2 mb-0.5 select-none">
-                            <span 
-                              onClick={() => onOpenProfile && onOpenProfile(msg.senderId)}
-                              className="font-bold text-[15px] text-[#1D1C1D] hover:underline cursor-pointer flex items-center gap-1"
-                            >
-                              <span>{getCurrentName(msg.senderId, msg.senderName)}</span>
-                              {!msg.deletedForEveryone && bookmarks[msg.id] && <Bookmark className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" title="Bookmarked message" />}
-                            </span>
-                            <span className="text-[12px] text-[#616061] font-medium">
-                              {msg.timestamp} {msg.isEdited && <span className="text-[9px] text-slate-400 font-bold ml-1 hover:underline cursor-help select-none" title="This message has been edited">(edited)</span>}
-                            </span>
+                    ) : (() => {
+                      const isEphem = msg.isEphemeral;
+                      const senderName = isEphem ? 'Slackbot' : getCurrentName(msg.senderId, msg.senderName);
+                      const initials = isEphem ? 'SB' : getInitials(senderName);
+                      const avatarBg = isEphem ? 'bg-[#613064]' : getAvatarColorClass(senderName);
+
+                      return (
+                        <>
+                          {/* Perfect Avatar Circle badge */}
+                          <div 
+                            onClick={() => !isEphem && onOpenProfile && onOpenProfile(msg.senderId)}
+                            className={`w-9 h-9 rounded-full text-white font-extrabold flex items-center justify-center text-sm shrink-0 shadow-sm transition-all duration-100 ${isEphem ? 'cursor-default bg-[#613064]' : 'hover:scale-105 cursor-pointer ' + avatarBg}`}
+                          >
+                            {initials}
                           </div>
                           
-                          {msg.deletedForEveryone ? (
-                            <div className="text-[15px] leading-relaxed select-none">
-                              <span className="text-slate-400 italic">
-                                {msg.deletedByAdmin ? 'This message was deleted by admin' : 'This message was deleted'}
+                          {/* Content Block */}
+                          <div className="flex-1 min-w-0 ml-3 font-sans flex flex-col">
+                            <div className="flex items-baseline gap-2 mb-0.5 select-none">
+                              <span 
+                                onClick={() => !isEphem && onOpenProfile && onOpenProfile(msg.senderId)}
+                                className={`font-bold text-[15px] text-[#1D1C1D] flex items-center gap-1 ${isEphem ? 'cursor-default' : 'hover:underline cursor-pointer'}`}
+                              >
+                                <span>{senderName}</span>
+                                {isEphem && (
+                                  <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-slate-100 text-slate-500 font-black tracking-wide uppercase select-none">Bot</span>
+                                )}
+                                {!isEphem && !msg.deletedForEveryone && bookmarks[msg.id] && <Bookmark className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" title="Bookmarked message" />}
                               </span>
-                              {msg.deletedAtTime && (
-                                <span className="text-[11px] text-slate-400 ml-1.5 font-medium not-italic font-sans">
-                                  (Deleted at {msg.deletedAtTime})
-                                </span>
-                              )}
+                              <span className="text-[12px] text-[#616061] font-medium">
+                                {isEphem ? '(Only visible to you)' : msg.timestamp} {!isEphem && msg.isEdited && <span className="text-[9px] text-slate-400 font-bold ml-1 hover:underline cursor-help select-none" title="This message has been edited">(edited)</span>}
+                              </span>
                             </div>
-                          ) : editingMessageId === msg.id ? (
-                            <div className="flex flex-col gap-1.5 mt-1 font-sans">
-                              <textarea
-                                value={editText}
-                                onChange={(e) => setEditText(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    onEditMessage(msg.id, editText);
-                                    setEditingMessageId(null);
-                                  } else if (e.key === 'Escape') {
-                                    setEditingMessageId(null);
-                                  }
-                                }}
-                                className="w-full text-sm font-semibold p-2 border border-[#1164A3] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#1164A3] bg-white resize-none max-h-24 min-h-[44px]"
-                                autoFocus
-                              />
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={() => {
-                                    onEditMessage(msg.id, editText);
-                                    setEditingMessageId(null);
-                                  }}
-                                  className="px-2.5 py-1 text-[11px] font-bold text-white bg-[#1164A3] hover:bg-[#1164A3]/90 rounded-md transition-colors cursor-pointer shadow-sm"
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  onClick={() => setEditingMessageId(null)}
-                                  className="px-2.5 py-1 text-[11px] font-bold text-slate-500 bg-white border border-slate-300 hover:bg-slate-100 rounded-md transition-colors cursor-pointer shadow-sm"
-                                >
-                                  Cancel
-                                </button>
-                                <span className="text-[10px] text-slate-400 font-bold ml-2">
-                                  <b>Enter</b> to save • <b>Esc</b> to cancel
+                            
+                            {msg.deletedForEveryone ? (
+                              <div className="text-[15px] leading-relaxed select-none">
+                                <span className="text-slate-400 italic">
+                                  {msg.deletedByAdmin ? 'This message was deleted by admin' : 'This message was deleted'}
                                 </span>
+                                {msg.deletedAtTime && (
+                                  <span className="text-[11px] text-slate-400 ml-1.5 font-medium not-italic font-sans">
+                                    (Deleted at {msg.deletedAtTime})
+                                  </span>
+                                )}
                               </div>
-                            </div>
-                          ) : (
-                            <div className="text-[15px] text-[#1D1C1D] leading-relaxed">
-                              {renderFormattedContent(msg.content, activeWorkspace?.allWorkspaceMembers)}
-                              {msg.file && renderAttachment(msg.file, msg.id)}
-                            </div>
-                          )}
-                          {renderReactions(msg)}
-                          {renderThreadIndicator(msg)}
-                        </div>
-                      </>
-                    )}
+                            ) : editingMessageId === msg.id ? (
+                              <div className="flex flex-col gap-1.5 mt-1 font-sans">
+                                <textarea
+                                  value={editText}
+                                  onChange={(e) => setEditText(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                      e.preventDefault();
+                                      onEditMessage(msg.id, editText);
+                                      setEditingMessageId(null);
+                                    } else if (e.key === 'Escape') {
+                                      setEditingMessageId(null);
+                                    }
+                                  }}
+                                  className="w-full text-sm font-semibold p-2 border border-[#1164A3] rounded-lg focus:outline-none focus:ring-1 focus:ring-[#1164A3] bg-white resize-none max-h-24 min-h-[44px]"
+                                  autoFocus
+                                />
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => {
+                                      onEditMessage(msg.id, editText);
+                                      setEditingMessageId(null);
+                                    }}
+                                    className="px-2.5 py-1 text-[11px] font-bold text-white bg-[#1164A3] hover:bg-[#1164A3]/90 rounded-md transition-colors cursor-pointer shadow-sm"
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingMessageId(null)}
+                                    className="px-2.5 py-1 text-[11px] font-bold text-slate-500 bg-white border border-slate-300 hover:bg-slate-100 rounded-md transition-colors cursor-pointer shadow-sm"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <span className="text-[10px] text-slate-400 font-bold ml-2">
+                                    <b>Enter</b> to save • <b>Esc</b> to cancel
+                                  </span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className={`text-[15px] text-[#1D1C1D] leading-relaxed ${isEphem ? 'text-slate-550 font-sans italic border-l-2 border-slate-200 pl-2.5 mt-0.5' : ''}`}>
+                                {renderFormattedContent(msg.content, activeWorkspace?.allWorkspaceMembers)}
+                                {msg.file && renderAttachment(msg.file, msg.id)}
+                              </div>
+                            )}
+                            {renderReactions(msg)}
+                            {renderThreadIndicator(msg)}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               );
@@ -1824,6 +2055,55 @@ export default function ChatArea({
 
       {/* 3. COMPOSER PANEL - FLOATING ROUNDED BOX WITH EXACT TOOLBAR STYLE */}
       <footer className="p-6 pt-1 select-none shrink-0 bg-white">
+        {/* Active Scheduled Messages List (above composer) */}
+        {(() => {
+          const activeScheduled = (scheduledMessages || []).filter(
+            m => m.destinationId === activeDestinationId && !m.parentMessageId && m.status === 'pending'
+          );
+          if (activeScheduled.length === 0) return null;
+          return (
+            <div className="flex flex-col gap-2 mb-3.5 max-h-48 overflow-y-auto custom-scrollbar">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider px-1">Scheduled Messages</span>
+              {activeScheduled.map(sMsg => (
+                <div 
+                  key={sMsg.id} 
+                  className="px-3.5 py-2.5 bg-amber-50/70 border border-amber-200 rounded-lg flex items-center justify-between text-xs font-semibold text-amber-800 animate-in fade-in slide-in-from-bottom-2 duration-150 shadow-sm"
+                >
+                  <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                    <span className="text-[10.5px] text-amber-700 font-extrabold flex items-center gap-1 select-none">
+                      <span>⏰</span>
+                      <span>Scheduled for {formatReminderTime(sMsg.scheduledAt)}</span>
+                    </span>
+                    <p className="text-[11.5px] text-slate-800 font-normal truncate mt-0.5 max-w-[90%]">
+                      {sMsg.content || (sMsg.file ? `Attachment: ${sMsg.file.name}` : '')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 select-none">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInputText(sMsg.content || '');
+                        if (sMsg.file) setAttachment(sMsg.file);
+                        setScheduledTime(sMsg.scheduledAt ? (sMsg.scheduledAt.toDate ? sMsg.scheduledAt.toDate().getTime() : new Date(sMsg.scheduledAt).getTime()) : null);
+                        onCancelScheduledMessage(sMsg.id);
+                      }}
+                      className="px-2 py-1 text-[10px] font-extrabold text-[#1164A3] bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-350 rounded cursor-pointer transition-colors shadow-xs active:scale-95"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onCancelScheduledMessage(sMsg.id)}
+                      className="px-2 py-1 text-[10px] font-extrabold text-red-600 bg-white border border-slate-200 hover:bg-red-50 hover:border-red-200 rounded cursor-pointer transition-colors shadow-xs active:scale-95"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
         {/* Typing & Recording status bar */}
         <div className="h-5 flex items-center mb-1 px-1">
           {activeRecorders && activeRecorders.length > 0 ? (
@@ -1926,7 +2206,7 @@ export default function ChatArea({
           </div>
         )}
 
-        <div className="border border-[#E8E8E8] focus-within:ring-1 focus-within:ring-[#1164A3] focus-within:border-[#1164A3] rounded-xl flex flex-col overflow-hidden bg-white shadow-sm transition-all duration-100 bg-white">
+        <div className="border border-[#E8E8E8] focus-within:ring-1 focus-within:ring-[#1164A3] focus-within:border-[#1164A3] rounded-xl flex flex-col overflow-visible bg-white shadow-sm transition-all duration-100 bg-white relative">
           {isRecording ? (
             <div className="flex flex-col p-4 bg-slate-50 font-sans select-none animate-in slide-in-from-bottom-2 duration-200">
               <div className="flex items-center justify-between flex-wrap gap-3">
@@ -1980,6 +2260,23 @@ export default function ChatArea({
             </div>
           ) : (
             <>
+              {/* Golden Scheduling Preview Status Banner */}
+              {scheduledTime && (
+                <div className="mx-3.5 mt-3.5 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between text-xs font-semibold text-amber-800 animate-in fade-in slide-in-from-top-1 duration-100 select-none shadow-sm shrink-0">
+                  <span className="flex items-center gap-1.5">
+                    <span>⏰</span>
+                    <span>Scheduled to send <b>{formatReminderTime(scheduledTime)}</b></span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setScheduledTime(null)}
+                    className="text-[10px] font-extrabold text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200/80 px-2 py-0.5 rounded cursor-pointer transition-colors border-none"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+
               {/* Removable staged attachment pill */}
               {attachment && (
                 <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 animate-in slide-in-from-top-1 duration-100">
@@ -2168,21 +2465,135 @@ export default function ChatArea({
                   </button>
                 </div>
 
-                {/* Blue Send Button */}
-                <button
-                  type="button"
-                  onClick={handleSend}
-                  disabled={!inputText.trim() && !attachment}
-                  className={`p-1.5 rounded-lg flex items-center justify-center transition-all ${
-                    inputText.trim() || attachment
-                      ? 'bg-[#1164A3] hover:bg-[#1164A3]/90 text-white shadow-sm scale-100 hover:scale-105 active:scale-[0.95] cursor-pointer' 
-                      : 'text-slate-300 cursor-not-allowed bg-transparent'
-                  }`}
-                  title="Send message"
-                  aria-label="Send message"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
+                {/* Send and Schedule Controls */}
+                <div className="flex items-center gap-2 relative">
+                  {/* Highly polished calendar-clock Schedule Button */}
+                  <button
+                    type="button"
+                    onClick={() => setShowSchedulerPopover(!showSchedulerPopover)}
+                    className={`p-1.5 rounded-lg flex items-center justify-center transition-all border active:scale-[0.97] cursor-pointer ${
+                      scheduledTime 
+                        ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300 shadow-xs animate-pulse' 
+                        : 'hover:bg-slate-200 text-slate-600 hover:text-slate-900 border-transparent'
+                    }`}
+                    title="Schedule message"
+                  >
+                    <span className="text-[11.5px] font-black flex items-center gap-1.5 select-none font-sans px-1 py-0.5">
+                      📅 Schedule
+                    </span>
+                  </button>
+
+                  {/* Polished, Timezone-Safe Date/Time Scheduler Popover */}
+                  {showSchedulerPopover && (
+                    <>
+                      <div 
+                        className="fixed inset-0 z-[60]" 
+                        onClick={() => setShowSchedulerPopover(false)} 
+                      />
+                      <div className="absolute right-0 bottom-10 w-64 bg-white border border-[#E8E8E8] rounded-xl shadow-slack-popover p-4 z-[80] flex flex-col gap-3 font-sans animate-in fade-in slide-in-from-bottom-2 duration-100 select-none">
+                        <span className="text-[12px] font-black text-[#1D1C1D] leading-none">Schedule Message</span>
+                        
+                        {/* Quick options shortcuts */}
+                        <div className="flex flex-col gap-1 mt-0.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const target = new Date();
+                              target.setHours(18, 0, 0, 0); // 6:00 PM
+                              if (target.getTime() <= Date.now()) {
+                                target.setDate(target.getDate() + 1); // tomorrow
+                              }
+                              setScheduledTime(target.getTime());
+                              setShowSchedulerPopover(false);
+                            }}
+                            className="w-full text-left px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-[#1164A3] rounded transition-colors cursor-pointer border-none bg-transparent"
+                          >
+                            Today at 6:00 PM
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const target = new Date();
+                              target.setDate(target.getDate() + 1); // tomorrow
+                              target.setHours(9, 0, 0, 0); // 9:00 AM
+                              setScheduledTime(target.getTime());
+                              setShowSchedulerPopover(false);
+                            }}
+                            className="w-full text-left px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 hover:text-[#1164A3] rounded transition-colors cursor-pointer border-none bg-transparent"
+                          >
+                            Tomorrow at 9:00 AM
+                          </button>
+                        </div>
+                        
+                        <div className="h-[1px] bg-slate-100" />
+                        
+                        {/* Custom inputs */}
+                        <div className="flex flex-col gap-2">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wide">Custom date & time</span>
+                          <input
+                            type="date"
+                            value={customDate}
+                            onChange={(e) => setCustomDate(e.target.value)}
+                            className="w-full px-2.5 py-1.5 text-xs border border-slate-355 rounded-lg bg-white font-bold text-slate-750 focus:outline-none focus:ring-1 focus:ring-[#1164A3] focus:border-[#1164A3]"
+                          />
+                          <input
+                            type="time"
+                            value={customTime}
+                            onChange={(e) => setCustomTime(e.target.value)}
+                            className="w-full px-2.5 py-1.5 text-xs border border-slate-355 rounded-lg bg-white font-bold text-slate-750 focus:outline-none focus:ring-1 focus:ring-[#1164A3] focus:border-[#1164A3]"
+                          />
+                          <button
+                            type="button"
+                            disabled={!customDate || !customTime}
+                            onClick={() => {
+                              const [year, month, day] = customDate.split('-').map(Number);
+                              const [hour, min] = customTime.split(':').map(Number);
+                              const target = new Date(year, month - 1, day, hour, min, 0, 0);
+                              if (target.getTime() <= Date.now()) {
+                                alert("Please select a future time!");
+                                return;
+                              }
+                              setScheduledTime(target.getTime());
+                              setShowSchedulerPopover(false);
+                            }}
+                            className="w-full py-1.5 mt-1 bg-[#1164A3] hover:bg-[#1164A3]/90 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded-lg text-xs transition-colors cursor-pointer border-none"
+                          >
+                            Set Date & Time
+                          </button>
+                        </div>
+                        
+                        {scheduledTime && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setScheduledTime(null);
+                              setShowSchedulerPopover(false);
+                            }}
+                            className="text-[10px] font-black text-red-600 hover:underline text-center cursor-pointer mt-1 border-none bg-transparent"
+                          >
+                            Cancel Scheduling
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Blue Send Button */}
+                  <button
+                    type="button"
+                    onClick={handleSend}
+                    disabled={!inputText.trim() && !attachment}
+                    className={`p-1.5 rounded-lg flex items-center justify-center transition-all border border-transparent ${
+                      inputText.trim() || attachment
+                        ? 'bg-[#1164A3] hover:bg-[#1164A3]/90 text-white shadow-sm scale-100 hover:scale-105 active:scale-[0.95] cursor-pointer' 
+                        : 'text-slate-300 cursor-not-allowed bg-transparent'
+                    }`}
+                    title="Send message"
+                    aria-label="Send message"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </>
           )}

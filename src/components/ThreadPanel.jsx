@@ -67,6 +67,32 @@ const getMessageDate = (msg) => {
   return new Date(); // fallback
 };
 
+const formatReminderTime = (ts) => {
+  if (!ts) return '';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  const now = new Date();
+  
+  const timeString = d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+  
+  const today = new Date();
+  const tomorrow = new Date();
+  tomorrow.setDate(today.getDate() + 1);
+  
+  if (d.toDateString() === today.toDateString()) {
+    return `Today ${timeString}`;
+  } else if (d.toDateString() === tomorrow.toDateString()) {
+    return `Tomorrow ${timeString}`;
+  } else {
+    const month = d.toLocaleDateString('en-US', { month: 'short' });
+    const day = d.getDate();
+    return `${month} ${day} at ${timeString}`;
+  }
+};
+
 // Fuzzy Markdown formatting parser
 const renderFormattedContent = (content) => {
   if (!content) return '';
@@ -361,13 +387,22 @@ export default function ThreadPanel({
   onToggleReaction,
   activeThreadMessageId,
   onClose,
-  currentUser
+  currentUser,
+  scheduledMessages = [],
+  onScheduleMessage,
+  onCancelScheduledMessage
 }) {
   const [inputText, setInputText] = useState('');
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [linkLabel, setLinkLabel] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  
+  // Scheduled reply states
+  const [showSchedulerPopover, setShowSchedulerPopover] = useState(false);
+  const [scheduledTime, setScheduledTime] = useState(null);
+  const [customDate, setCustomDate] = useState('');
+  const [customTime, setCustomTime] = useState('');
   const [attachment, setAttachment] = useState(null);
   const [activeAudioId, setActiveAudioId] = useState(null);
 
@@ -480,7 +515,14 @@ export default function ThreadPanel({
 
   const handleSend = () => {
     if (!inputText.trim() && !attachment) return;
-    onSendMessage(inputText, attachment, activeThreadMessageId);
+
+    if (scheduledTime) {
+      onScheduleMessage(inputText, attachment, activeThreadMessageId, scheduledTime);
+      setScheduledTime(null);
+    } else {
+      onSendMessage(inputText, attachment, activeThreadMessageId);
+    }
+
     setInputText('');
     setAttachment(null);
     setShowLinkModal(false);
@@ -1116,8 +1158,73 @@ export default function ThreadPanel({
 
       {/* COMPOSER AT BOTTOM */}
       <footer className="p-4 pt-1 bg-white shrink-0">
-        <div className="border border-[#E8E8E8] focus-within:ring-1 focus-within:ring-[#1164A3] focus-within:border-[#1164A3] rounded-xl flex flex-col overflow-hidden bg-white shadow-sm transition-all duration-100 bg-white relative">
-          
+        {/* Active Scheduled Thread Replies */}
+        {(() => {
+          const activeScheduled = (scheduledMessages || []).filter(
+            m => m.destinationId === activeDestinationId && m.parentMessageId === activeThreadMessageId && m.status === 'pending'
+          );
+          if (activeScheduled.length === 0) return null;
+          return (
+            <div className="flex flex-col gap-1.5 mb-2 max-h-36 overflow-y-auto custom-scrollbar select-none">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider px-0.5 font-sans">Scheduled Replies</span>
+              {activeScheduled.map(sMsg => (
+                <div 
+                  key={sMsg.id} 
+                  className="px-2.5 py-1.5 bg-amber-50/70 border border-amber-200 rounded-lg flex items-center justify-between text-[11px] font-semibold text-amber-800 animate-in fade-in slide-in-from-bottom-1 duration-100 shadow-xs"
+                >
+                  <div className="min-w-0 flex-1 flex flex-col gap-0.5">
+                    <span className="text-[10px] text-amber-700 font-extrabold flex items-center gap-1 select-none font-sans">
+                      <span>⏰</span>
+                      <span>Scheduled for {formatReminderTime(sMsg.scheduledAt)}</span>
+                    </span>
+                    <p className="text-[11px] text-slate-800 font-normal truncate max-w-[85%] font-sans">
+                      {sMsg.content || (sMsg.file ? `Attachment: ${sMsg.file.name}` : '')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInputText(sMsg.content || '');
+                        if (sMsg.file) setAttachment(sMsg.file);
+                        setScheduledTime(sMsg.scheduledAt ? (sMsg.scheduledAt.toDate ? sMsg.scheduledAt.toDate().getTime() : new Date(sMsg.scheduledAt).getTime()) : null);
+                        onCancelScheduledMessage(sMsg.id);
+                      }}
+                      className="px-1.5 py-0.5 text-[9px] font-extrabold text-[#1164A3] bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-350 rounded cursor-pointer transition-colors shadow-2xs active:scale-95 border-none"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onCancelScheduledMessage(sMsg.id)}
+                      className="px-1.5 py-0.5 text-[9px] font-extrabold text-red-600 bg-white border border-slate-200 hover:bg-red-50 hover:border-red-200 rounded cursor-pointer transition-colors shadow-2xs active:scale-95 border-none"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+        <div className="border border-[#E8E8E8] focus-within:ring-1 focus-within:ring-[#1164A3] focus-within:border-[#1164A3] rounded-xl flex flex-col overflow-visible bg-white shadow-sm transition-all duration-100 bg-white relative">
+          {/* Golden Scheduling Preview Status Banner inside Thread Panel */}
+          {scheduledTime && (
+            <div className="mx-2.5 mt-2.5 px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between text-[11px] font-semibold text-amber-800 animate-in fade-in slide-in-from-top-1 duration-100 select-none shadow-xs shrink-0">
+              <span className="flex items-center gap-1 font-sans">
+                <span>⏰</span>
+                <span>Scheduled to reply <b>{formatReminderTime(scheduledTime)}</b></span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setScheduledTime(null)}
+                className="text-[9px] font-extrabold text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200/80 px-1.5 py-0.5 rounded cursor-pointer transition-colors border-none"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
           {/* Staged staged file preview */}
           {attachment && (
             <div className="px-3 py-1.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 animate-in slide-in-from-top-1 duration-100">
@@ -1296,19 +1403,133 @@ export default function ThreadPanel({
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={!inputText.trim() && !attachment}
-              className={`p-1 rounded flex items-center justify-center transition-all ${
-                inputText.trim() || attachment
-                  ? 'bg-[#1164A3] hover:bg-[#1164A3]/90 text-white scale-100 hover:scale-105 active:scale-[0.95] cursor-pointer shadow-sm' 
-                  : 'text-slate-300 cursor-not-allowed bg-transparent'
-              }`}
-              title="Send reply"
-            >
-              <Send className="w-3.5 h-3.5" />
-            </button>
+            {/* Send & Schedule Reply Controls inside Thread Panel */}
+            <div className="flex items-center gap-1.5 relative">
+              {/* Sleek Schedule Button */}
+              <button
+                type="button"
+                onClick={() => setShowSchedulerPopover(!showSchedulerPopover)}
+                className={`p-1 rounded flex items-center justify-center transition-all border active:scale-[0.97] cursor-pointer ${
+                  scheduledTime 
+                    ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300 shadow-2xs animate-pulse' 
+                    : 'hover:bg-slate-200 text-slate-500 hover:text-slate-900 border-transparent'
+                }`}
+                title="Schedule reply"
+              >
+                <span className="text-[10px] font-black flex items-center gap-1 select-none font-sans px-1 py-0.5">
+                  📅 Schedule
+                </span>
+              </button>
+
+              {/* Thread Scheduler Popover */}
+              {showSchedulerPopover && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-[60]" 
+                    onClick={() => setShowSchedulerPopover(false)} 
+                  />
+                  <div className="absolute right-0 bottom-8 w-56 bg-white border border-[#E8E8E8] rounded-xl shadow-slack-popover p-3 z-[80] flex flex-col gap-2.5 font-sans animate-in fade-in slide-in-from-bottom-1 duration-100 select-none">
+                    <span className="text-[10.5px] font-black text-[#1D1C1D] leading-none">Schedule Reply</span>
+                    
+                    {/* Quick options */}
+                    <div className="flex flex-col gap-0.5 mt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const target = new Date();
+                          target.setHours(18, 0, 0, 0); // 6:00 PM
+                          if (target.getTime() <= Date.now()) {
+                            target.setDate(target.getDate() + 1); // tomorrow
+                          }
+                          setScheduledTime(target.getTime());
+                          setShowSchedulerPopover(false);
+                        }}
+                        className="w-full text-left px-2 py-1 text-[10.5px] font-bold text-slate-700 hover:bg-slate-50 hover:text-[#1164A3] rounded transition-colors cursor-pointer border-none bg-transparent"
+                      >
+                        Today at 6:00 PM
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const target = new Date();
+                          target.setDate(target.getDate() + 1); // tomorrow
+                          target.setHours(9, 0, 0, 0); // 9:00 AM
+                          setScheduledTime(target.getTime());
+                          setShowSchedulerPopover(false);
+                        }}
+                        className="w-full text-left px-2 py-1 text-[10.5px] font-bold text-slate-700 hover:bg-slate-50 hover:text-[#1164A3] rounded transition-colors cursor-pointer border-none bg-transparent"
+                      >
+                        Tomorrow at 9:00 AM
+                      </button>
+                    </div>
+                    
+                    <div className="h-[1px] bg-slate-100" />
+                    
+                    {/* Custom options */}
+                    <div className="flex flex-col gap-1.5">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-wide">Custom date & time</span>
+                      <input
+                        type="date"
+                        value={customDate}
+                        onChange={(e) => setCustomDate(e.target.value)}
+                        className="w-full px-2 py-1 text-[10px] border border-slate-350 rounded bg-white font-bold text-slate-750 focus:outline-none focus:ring-1 focus:ring-[#1164A3] focus:border-[#1164A3]"
+                      />
+                      <input
+                        type="time"
+                        value={customTime}
+                        onChange={(e) => setCustomTime(e.target.value)}
+                        className="w-full px-2 py-1 text-[10px] border border-slate-355 rounded bg-white font-bold text-slate-750 focus:outline-none focus:ring-1 focus:ring-[#1164A3] focus:border-[#1164A3]"
+                      />
+                      <button
+                        type="button"
+                        disabled={!customDate || !customTime}
+                        onClick={() => {
+                          const [year, month, day] = customDate.split('-').map(Number);
+                          const [hour, min] = customTime.split(':').map(Number);
+                          const target = new Date(year, month - 1, day, hour, min, 0, 0);
+                          if (target.getTime() <= Date.now()) {
+                            alert("Please select a future time!");
+                            return;
+                          }
+                          setScheduledTime(target.getTime());
+                          setShowSchedulerPopover(false);
+                        }}
+                        className="w-full py-1 bg-[#1164A3] hover:bg-[#1164A3]/90 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black rounded text-[10px] transition-colors cursor-pointer border-none"
+                      >
+                        Set Date & Time
+                      </button>
+                    </div>
+                    
+                    {scheduledTime && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setScheduledTime(null);
+                          setShowSchedulerPopover(false);
+                        }}
+                        className="text-[9px] font-black text-red-600 hover:underline text-center cursor-pointer mt-0.5 border-none bg-transparent"
+                      >
+                        Cancel Scheduling
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={!inputText.trim() && !attachment}
+                className={`p-1 rounded flex items-center justify-center transition-all border border-transparent ${
+                  inputText.trim() || attachment
+                    ? 'bg-[#1164A3] hover:bg-[#1164A3]/90 text-white scale-100 hover:scale-105 active:scale-[0.95] cursor-pointer shadow-sm' 
+                    : 'text-slate-300 cursor-not-allowed bg-transparent'
+                }`}
+                title="Send reply"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
       </footer>
