@@ -91,5 +91,22 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isSignedIn() && request.auth.uid == userId;
     }
+
+    // 8. Scheduled Messages Rules
+    match /scheduled_messages/{msgId} {
+      allow read: if isSignedIn() && isMemberOfWorkspace(resource.data.workspaceId);
+      allow create: if isSignedIn() && isMemberOfWorkspace(request.resource.data.workspaceId) && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isSignedIn() && (
+        resource.data.createdBy == request.auth.uid
+        || isWorkspaceCreator(resource.data.workspaceId)
+      );
+    }
+
+    // 9. Reminders Rules
+    match /reminders/{reminderId} {
+      allow read: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      allow create: if isSignedIn() && isMemberOfWorkspace(request.resource.data.workspaceId) && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+    }
   }
 }

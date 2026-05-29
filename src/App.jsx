@@ -73,6 +73,8 @@ function SlackDashboard({ user, logout }) {
   const [unreadNotifications, setUnreadNotifications] = useState([]);
   const [activeTypers, setActiveTypers] = useState([]);
   const [selectedProfileUser, setSelectedProfileUser] = useState(null);
+  const [scheduledMessages, setScheduledMessages] = useState([]);
+  const [reminders, setReminders] = useState([]);
 
   // Preference States
   const [theme, setTheme] = useState(() => localStorage.getItem('slack_theme') || 'light');
@@ -759,6 +761,188 @@ function SlackDashboard({ user, logout }) {
   }, [user]);
 
   // ========================================================
+  // 5.8c. REAL-TIME OBSERVERS & SCHEDULER: SCHEDULED MESSAGES & REMINDERS
+  // ========================================================
+  // 1. Firestore Observers
+  useEffect(() => {
+    if (!isConfigured || !activeWorkspaceId || !user) {
+      setScheduledMessages([]);
+      return;
+    }
+    const q = query(
+      collection(db, 'scheduled_messages'),
+      where('workspaceId', '==', activeWorkspaceId),
+      where('status', '==', 'pending')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+      setScheduledMessages(list);
+    }, (err) => {
+      console.warn('Scheduled messages observer error:', err);
+    });
+    return () => unsubscribe();
+  }, [isConfigured, activeWorkspaceId, user]);
+
+  useEffect(() => {
+    if (!isConfigured || !activeWorkspaceId || !user) {
+      setReminders([]);
+      return;
+    }
+    const q = query(
+      collection(db, 'reminders'),
+      where('workspaceId', '==', activeWorkspaceId),
+      where('status', '==', 'pending'),
+      where('createdBy', '==', user.uid)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => list.push({ id: docSnap.id, ...docSnap.data() }));
+      setReminders(list);
+    }, (err) => {
+      console.warn('Reminders observer error:', err);
+    });
+    return () => unsubscribe();
+  }, [isConfigured, activeWorkspaceId, user]);
+
+  // 2. Emulator localStorage sync
+  useEffect(() => {
+    if (isConfigured || !user || !activeWorkspaceId) return;
+    const loadEmulatorData = () => {
+      const allSched = JSON.parse(localStorage.getItem('slack_scheduled_messages') || '[]');
+      const pendingSched = allSched.filter(m => m.workspaceId === activeWorkspaceId && m.status === 'pending');
+      setScheduledMessages(pendingSched);
+
+      const allReminders = JSON.parse(localStorage.getItem('slack_reminders') || '[]');
+      const pendingReminders = allReminders.filter(r => r.workspaceId === activeWorkspaceId && r.status === 'pending' && r.createdBy === user.uid);
+      setReminders(pendingReminders);
+    };
+
+    loadEmulatorData();
+    window.addEventListener('storage', loadEmulatorData);
+    window.addEventListener('slack_local_scheduled_messages_update', loadEmulatorData);
+    window.addEventListener('slack_local_reminders_update', loadEmulatorData);
+    return () => {
+      window.removeEventListener('storage', loadEmulatorData);
+      window.removeEventListener('slack_local_scheduled_messages_update', loadEmulatorData);
+      window.removeEventListener('slack_local_reminders_update', loadEmulatorData);
+    };
+  }, [isConfigured, activeWorkspaceId, user]);
+
+  // 3. Heartbeat Scheduler Loop (runs every 5 seconds)
+  useEffect(() => {
+    if (!user || !activeWorkspaceId) return;
+
+    const checkPendingJobs = async () => {
+      const now = Date.now();
+
+      // Process Missed or Pending Reminders
+      const pendingReminders = reminders.filter(r => {
+        let rTime = r.scheduledAt;
+        if (rTime && typeof rTime.toDate === 'function') {
+          rTime = rTime.toDate().getTime();
+        } else if (typeof rTime === 'string' || typeof rTime === 'number') {
+          rTime = new Date(rTime).getTime();
+        }
+        return rTime <= now && r.createdBy === user.uid;
+      });
+
+      for (const rem of pendingReminders) {
+        console.log('⏰ Triggering reminder:', rem);
+        if (isConfigured) {
+          try {
+            await updateDoc(doc(db, 'reminders', rem.id), { status: 'sent' });
+            const notificationData = {
+              workspaceId: activeWorkspaceId,
+              userId: user.uid,
+              senderId: 'slackbot',
+              senderName: 'Slackbot',
+              senderAvatar: 'SB',
+              content: rem.text,
+              type: 'reminder',
+              destinationId: rem.destinationId,
+              isDestinationDm: rem.isDestinationDm || false,
+              messageId: rem.id,
+              createdAt: serverTimestamp()
+            };
+            await addDoc(collection(db, 'notifications'), notificationData);
+          } catch (err) {
+            console.error('Error triggering Firestore reminder:', err);
+          }
+        } else {
+          try {
+            const allReminders = JSON.parse(localStorage.getItem('slack_reminders') || '[]');
+            const updated = allReminders.map(r => r.id === rem.id ? { ...r, status: 'sent' } : r);
+            localStorage.setItem('slack_reminders', JSON.stringify(updated));
+
+            const localKey = `slack_notifications_user_${user.uid}`;
+            const localData = JSON.parse(localStorage.getItem(localKey) || '[]');
+            localData.push({
+              id: `notif-${Date.now()}-${Math.random()}`,
+              workspaceId: activeWorkspaceId,
+              userId: user.uid,
+              senderId: 'slackbot',
+              senderName: 'Slackbot',
+              senderAvatar: 'SB',
+              content: rem.text,
+              type: 'reminder',
+              destinationId: rem.destinationId,
+              isDestinationDm: rem.isDestinationDm || false,
+              messageId: rem.id,
+              createdAt: Date.now()
+            });
+            localStorage.setItem(localKey, JSON.stringify(localData));
+
+            window.dispatchEvent(new Event('storage'));
+            window.dispatchEvent(new Event('slack_local_notifications_update'));
+            window.dispatchEvent(new Event('slack_local_reminders_update'));
+          } catch (e) {
+            console.error('Error triggering local reminder:', e);
+          }
+        }
+      }
+
+      // Process Missed or Pending Scheduled Messages
+      const pendingMessages = scheduledMessages.filter(m => {
+        let mTime = m.scheduledAt;
+        if (mTime && typeof mTime.toDate === 'function') {
+          mTime = mTime.toDate().getTime();
+        } else if (typeof mTime === 'string' || typeof mTime === 'number') {
+          mTime = new Date(mTime).getTime();
+        }
+        return mTime <= now && m.createdBy === user.uid;
+      });
+
+      for (const sMsg of pendingMessages) {
+        console.log('📅 Sending scheduled message:', sMsg);
+        if (isConfigured) {
+          try {
+            await updateDoc(doc(db, 'scheduled_messages', sMsg.id), { status: 'sent' });
+            await handleSendMessage(sMsg.content, sMsg.file || null, sMsg.parentMessageId || null);
+          } catch (err) {
+            console.error('Error sending Firestore scheduled message:', err);
+          }
+        } else {
+          try {
+            const allSched = JSON.parse(localStorage.getItem('slack_scheduled_messages') || '[]');
+            const updated = allSched.map(m => m.id === sMsg.id ? { ...m, status: 'sent' } : m);
+            localStorage.setItem('slack_scheduled_messages', JSON.stringify(updated));
+
+            await handleSendMessage(sMsg.content, sMsg.file || null, sMsg.parentMessageId || null);
+            window.dispatchEvent(new Event('slack_local_scheduled_messages_update'));
+          } catch (e) {
+            console.error('Error sending local scheduled message:', e);
+          }
+        }
+      }
+    };
+
+    checkPendingJobs();
+    const interval = setInterval(checkPendingJobs, 5000);
+    return () => clearInterval(interval);
+  }, [user, activeWorkspaceId, scheduledMessages, reminders, isConfigured]);
+
+  // ========================================================
   // 5.9. TYPING & RECORDING STATUS CLEANUP ON UNLOAD / LOGOUT / UNMOUNT
   // ========================================================
   useEffect(() => {
@@ -1395,6 +1579,112 @@ function SlackDashboard({ user, logout }) {
       // Dispatch storage update
       window.dispatchEvent(new Event('storage'));
       window.dispatchEvent(new Event('slack_local_notifications_update'));
+    }
+  };
+  const handleScheduleMessage = async (content, fileAttachment = null, parentMessageId = null, scheduledAt) => {
+    if (!activeWorkspaceId || !activeDestinationId || !user) return;
+
+    const scheduledData = {
+      workspaceId: activeWorkspaceId,
+      destinationId: activeDestinationId,
+      isDestinationDm: isDestinationDm,
+      createdBy: user.uid,
+      content: content || '',
+      parentMessageId: parentMessageId || null,
+      status: 'pending',
+      scheduledAt: scheduledAt,
+      createdAt: Date.now()
+    };
+
+    if (fileAttachment) {
+      scheduledData.file = fileAttachment;
+    }
+
+    if (isConfigured) {
+      try {
+        await addDoc(collection(db, 'scheduled_messages'), {
+          ...scheduledData,
+          scheduledAt: new Date(scheduledAt),
+          createdAt: serverTimestamp()
+        });
+      } catch (err) {
+        console.error('Error writing scheduled message to Firestore:', err);
+      }
+    } else {
+      try {
+        const allSched = JSON.parse(localStorage.getItem('slack_scheduled_messages') || '[]');
+        const newItem = {
+          id: `sched-${Date.now()}-${Math.random()}`,
+          ...scheduledData
+        };
+        allSched.push(newItem);
+        localStorage.setItem('slack_scheduled_messages', JSON.stringify(allSched));
+        
+        window.dispatchEvent(new Event('slack_local_scheduled_messages_update'));
+      } catch (e) {
+        console.error('Error writing local scheduled message:', e);
+      }
+    }
+  };
+
+  const handleCancelScheduledMessage = async (id) => {
+    if (isConfigured) {
+      try {
+        await deleteDoc(doc(db, 'scheduled_messages', id));
+      } catch (err) {
+        console.error('Error deleting scheduled message from Firestore:', err);
+      }
+    } else {
+      try {
+        const allSched = JSON.parse(localStorage.getItem('slack_scheduled_messages') || '[]');
+        const filtered = allSched.filter(m => m.id !== id);
+        localStorage.setItem('slack_scheduled_messages', JSON.stringify(filtered));
+
+        window.dispatchEvent(new Event('slack_local_scheduled_messages_update'));
+      } catch (e) {
+        console.error('Error deleting local scheduled message:', e);
+      }
+    }
+  };
+
+  const handleScheduleReminder = async (text, scheduledAt) => {
+    if (!activeWorkspaceId || !activeDestinationId || !user) return;
+
+    const reminderData = {
+      workspaceId: activeWorkspaceId,
+      destinationId: activeDestinationId,
+      isDestinationDm: isDestinationDm,
+      createdBy: user.uid,
+      text: text,
+      status: 'pending',
+      scheduledAt: scheduledAt,
+      createdAt: Date.now()
+    };
+
+    if (isConfigured) {
+      try {
+        await addDoc(collection(db, 'reminders'), {
+          ...reminderData,
+          scheduledAt: new Date(scheduledAt),
+          createdAt: serverTimestamp()
+        });
+      } catch (err) {
+        console.error('Error writing reminder to Firestore:', err);
+      }
+    } else {
+      try {
+        const allReminders = JSON.parse(localStorage.getItem('slack_reminders') || '[]');
+        const newItem = {
+          id: `rem-${Date.now()}-${Math.random()}`,
+          ...reminderData
+        };
+        allReminders.push(newItem);
+        localStorage.setItem('slack_reminders', JSON.stringify(allReminders));
+
+        window.dispatchEvent(new Event('slack_local_reminders_update'));
+      } catch (e) {
+        console.error('Error writing local reminder:', e);
+      }
     }
   };
 
@@ -2370,6 +2660,10 @@ function SlackDashboard({ user, logout }) {
             setRightPanelOpen(false);
           }}
           onTogglePinMessage={handleTogglePinMessage}
+          scheduledMessages={scheduledMessages}
+          onScheduleMessage={handleScheduleMessage}
+          onCancelScheduledMessage={handleCancelScheduledMessage}
+          onScheduleReminder={handleScheduleReminder}
         />
 
         {/* Right side panels: either ThreadPanel, PinnedPanel, or MembersPanel */}
@@ -2386,6 +2680,9 @@ function SlackDashboard({ user, logout }) {
             activeThreadMessageId={activeThreadMessageId}
             onClose={() => setActiveThreadMessageId(null)}
             currentUser={user}
+            scheduledMessages={scheduledMessages}
+            onScheduleMessage={handleScheduleMessage}
+            onCancelScheduledMessage={handleCancelScheduledMessage}
           />
         ) : pinnedPanelOpen && activeWorkspace ? (
           <PinnedPanel
