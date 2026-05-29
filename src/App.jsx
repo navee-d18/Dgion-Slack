@@ -64,6 +64,8 @@ function SlackDashboard({ user, logout }) {
   const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
   // Pinned messages are fetched separately (full set) so pagination doesn't hide them.
   const [pinnedMessages, setPinnedMessages] = useState([]);
+  // Read receipts for the active conversation (per-user lastReadAt) → Seen/Delivered status.
+  const [readReceipts, setReadReceipts] = useState([]);
 
   const latestUsersRef = useRef(allRegisteredUsers);
   useEffect(() => {
@@ -524,6 +526,7 @@ function SlackDashboard({ user, logout }) {
       setMessageLimit(MESSAGE_PAGE_SIZE);
       setHasMoreMessages(false);
       setPinnedMessages([]);
+      setReadReceipts([]);
     }
   }, [activeWorkspaceId, activeDestinationId, isDestinationDm, user]);
 
@@ -637,6 +640,89 @@ function SlackDashboard({ user, logout }) {
 
     return () => unsubscribe();
   }, [activeWorkspaceId, activeDestinationId, user, isDestinationDm]);
+
+  // ========================================================
+  // 5.06. READ RECEIPTS: observe active conversation + mark-as-read writer
+  // ========================================================
+  // conversationKey groups a conversation symmetrically: a DM uses the sorted uid
+  // pair (identical for both participants); a channel uses the channelId.
+  const activeConversationKey = (activeWorkspaceId && activeDestinationId && user)
+    ? (isDestinationDm ? [user.uid, activeDestinationId].sort().join('_') : activeDestinationId)
+    : '';
+
+  // 1. Firestore observer for the active conversation's receipts
+  useEffect(() => {
+    if (!isConfigured || !activeWorkspaceId || !activeConversationKey || !user) return;
+    const q = query(
+      collection(db, 'read_receipts'),
+      where('workspaceId', '==', activeWorkspaceId),
+      where('conversationKey', '==', activeConversationKey)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data({ serverTimestamps: 'estimate' }) });
+      });
+      setReadReceipts(list);
+    }, (err) => {
+      console.warn('Read receipts observer error:', err);
+    });
+    return () => unsubscribe();
+  }, [isConfigured, activeWorkspaceId, activeConversationKey, user]);
+
+  // 2. Emulation: load receipts from localStorage for the active conversation
+  useEffect(() => {
+    if (isConfigured || !activeWorkspaceId || !activeConversationKey || !user) return;
+    const loadLocalReceipts = () => {
+      const all = JSON.parse(localStorage.getItem('slack_read_receipts') || '{}');
+      setReadReceipts(Object.values(all).filter(
+        r => r.conversationKey === activeConversationKey && r.workspaceId === activeWorkspaceId
+      ));
+    };
+    loadLocalReceipts();
+    window.addEventListener('storage', loadLocalReceipts);
+    window.addEventListener('slack_local_read_receipts_update', loadLocalReceipts);
+    return () => {
+      window.removeEventListener('storage', loadLocalReceipts);
+      window.removeEventListener('slack_local_read_receipts_update', loadLocalReceipts);
+    };
+  }, [isConfigured, activeWorkspaceId, activeConversationKey, user]);
+
+  // 3. Mark the active conversation read (own lastReadAt) — focus-aware + throttled.
+  const lastReadWriteRef = useRef({ key: '', at: 0 });
+  const activeMessagesCount = messages[`${activeWorkspaceId}-${activeDestinationId}`]?.length || 0;
+  useEffect(() => {
+    if (!user || !activeWorkspaceId || !activeConversationKey) return;
+    if (typeof document !== 'undefined' && document.hasFocus && !document.hasFocus()) return;
+
+    // Throttle: skip if we wrote for this same conversation < 2s ago.
+    const nowMs = Date.now();
+    if (lastReadWriteRef.current.key === activeConversationKey && nowMs - lastReadWriteRef.current.at < 2000) return;
+    lastReadWriteRef.current = { key: activeConversationKey, at: nowMs };
+
+    const receiptId = `${activeConversationKey}__${user.uid}`;
+    const payload = {
+      workspaceId: activeWorkspaceId,
+      conversationKey: activeConversationKey,
+      isDm: isDestinationDm,
+      userId: user.uid,
+      userName: user.name
+    };
+
+    if (isConfigured) {
+      setDoc(doc(db, 'read_receipts', receiptId), { ...payload, lastReadAt: serverTimestamp() }, { merge: true })
+        .catch((err) => console.warn('Failed to write read receipt:', err));
+    } else {
+      try {
+        const all = JSON.parse(localStorage.getItem('slack_read_receipts') || '{}');
+        all[receiptId] = { ...payload, lastReadAt: nowMs };
+        localStorage.setItem('slack_read_receipts', JSON.stringify(all));
+        window.dispatchEvent(new Event('slack_local_read_receipts_update'));
+      } catch (e) {
+        console.warn('Failed to write local read receipt:', e);
+      }
+    }
+  }, [user, activeWorkspaceId, activeConversationKey, isDestinationDm, activeMessagesCount]);
 
   // ========================================================
   // 5.5. REAL-TIME OBSERVER: NOTIFICATIONS (FIRESTORE MODE)
@@ -2933,6 +3019,7 @@ function SlackDashboard({ user, logout }) {
           loadingMoreMessages={loadingMoreMessages}
           onLoadMoreMessages={handleLoadMoreMessages}
           pinnedMessages={pinnedMessages}
+          readReceipts={readReceipts}
           onSendMessage={handleSendMessage}
           onDeleteMessage={handleDeleteMessage}
           onEditMessage={handleEditMessage}

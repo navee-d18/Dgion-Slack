@@ -35,6 +35,14 @@
         { "fieldPath": "conversationId", "order": "ASCENDING" },
         { "fieldPath": "isPinned", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "read_receipts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "workspaceId", "order": "ASCENDING" },
+        { "fieldPath": "conversationKey", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

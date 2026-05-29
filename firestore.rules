@@ -115,5 +115,20 @@ service cloud.firestore {
       allow create: if isSignedIn() && isMemberOfWorkspace(request.resource.data.workspaceId) && request.resource.data.createdBy == request.auth.uid;
       allow update, delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
     }
+
+    // 10. Read Receipts Rules (per-conversation lastReadAt for Seen/Delivered status)
+    match /read_receipts/{receiptId} {
+      // Any workspace member can read receipts for the conversation (list-query-safe:
+      // queries filter by workspaceId, which isMemberOfWorkspace can prove).
+      allow read: if isSignedIn() && isMemberOfWorkspace(resource.data.workspaceId);
+      // A user may only write their OWN receipt.
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && isMemberOfWorkspace(request.resource.data.workspaceId);
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if false;
+    }
   }
 }

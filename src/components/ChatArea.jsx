@@ -3,7 +3,7 @@ import {
   Hash, Lock, Search, Users, Menu, Send, Bold, Italic,
   Strikethrough, Code, Link, Paperclip, Smile, HelpCircle,
   MoreHorizontal, MessageSquare, Bookmark, SmilePlus, Loader2, Settings,
-  X, Trash2, Edit, Bell, Pin, Mic
+  X, Trash2, Edit, Bell, Pin, Mic, Check, CheckCheck, Eye
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -528,6 +528,34 @@ const VoiceNotePlayer = ({ file, messageId, setActiveAudioId }) => {
   );
 };
 
+// Channel "Seen by N" — click to expand the list of members who've read the message.
+const SeenByIndicator = ({ names }) => {
+  const [open, setOpen] = useState(false);
+  if (!names || names.length === 0) return null;
+  return (
+    <div className="mt-0.5 select-none">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 font-semibold transition-colors cursor-pointer"
+        title="Seen by"
+      >
+        <Eye className="w-3.5 h-3.5 shrink-0" />
+        Seen by {names.length}
+      </button>
+      {open && (
+        <div className="mt-1 flex flex-wrap gap-1 animate-in fade-in duration-100">
+          {names.map((n, i) => (
+            <span key={i} className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">
+              {n}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function ChatArea({
   activeWorkspace,
   activeDestinationId,
@@ -538,6 +566,7 @@ export default function ChatArea({
   loadingMoreMessages = false,
   onLoadMoreMessages,
   pinnedMessages = [],
+  readReceipts = [],
   onSendMessage,
   onDeleteMessage,
   onEditMessage,
@@ -845,6 +874,69 @@ export default function ChatArea({
         </span>
       </button>
     );
+  };
+
+  // ── Read receipts ───────────────────────────────────────────────
+  const getReceiptMillis = (ts) => {
+    if (!ts) return 0;
+    if (typeof ts === 'number') return ts;
+    if (typeof ts.toMillis === 'function') return ts.toMillis();
+    if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+    const d = new Date(ts);
+    return isNaN(d.getTime()) ? 0 : d.getTime();
+  };
+
+  const formatSeenTime = (ts) => {
+    const ms = getReceiptMillis(ts);
+    if (!ms) return '';
+    return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  };
+
+  // Status shown only on the current user's OWN messages.
+  const renderSeenStatus = (msg) => {
+    if (!msg || !user || msg.senderId !== user.uid) return null;
+    if (msg.isEphemeral || msg.deletedForEveryone) return null;
+    const msgMs = getReceiptMillis(msg.createdAt);
+    if (!msgMs) return null;
+
+    if (isDestinationDm) {
+      const recipientReceipt = readReceipts.find(r => r.userId === activeDestinationId);
+      const seenMs = recipientReceipt ? getReceiptMillis(recipientReceipt.lastReadAt) : 0;
+      if (seenMs && seenMs >= msgMs) {
+        return (
+          <span className="flex items-center gap-1 text-[11px] text-[#1164A3] font-bold mt-0.5 select-none">
+            <CheckCheck className="w-3.5 h-3.5 shrink-0" /> Seen {formatSeenTime(recipientReceipt.lastReadAt)}
+          </span>
+        );
+      }
+      // Delivered: recipient online now, or online after the message was sent.
+      const recipientMember = activeWorkspace?.allWorkspaceMembers?.find(m => m.id === activeDestinationId);
+      const isOnline = recipientMember && (
+        recipientMember.presenceStatus === 'online' ||
+        recipientMember.onlineStatus === 'online' ||
+        recipientMember.status === 'online'
+      );
+      const presenceMs = recipientMember ? getReceiptMillis(recipientMember.lastSeenAt) : 0;
+      if (isOnline || (presenceMs && presenceMs >= msgMs)) {
+        return (
+          <span className="flex items-center gap-1 text-[11px] text-slate-400 font-semibold mt-0.5 select-none">
+            <CheckCheck className="w-3.5 h-3.5 shrink-0" /> Delivered
+          </span>
+        );
+      }
+      return (
+        <span className="flex items-center gap-1 text-[11px] text-slate-400 font-semibold mt-0.5 select-none">
+          <Check className="w-3.5 h-3.5 shrink-0" /> Sent
+        </span>
+      );
+    }
+
+    // Channel: who has read up to this message (excluding the sender).
+    const seenByNames = readReceipts
+      .filter(r => r.userId !== user.uid && getReceiptMillis(r.lastReadAt) >= msgMs)
+      .map(r => r.userName)
+      .filter(Boolean);
+    return <SeenByIndicator names={seenByNames} />;
   };
 
   const fileInputRef = useRef(null);
@@ -2050,6 +2142,7 @@ export default function ChatArea({
                           )}
                           {renderReactions(msg)}
                           {renderThreadIndicator(msg)}
+                          {renderSeenStatus(msg)}
                         </div>
                       </>
                     ) : (() => {
@@ -2143,6 +2236,7 @@ export default function ChatArea({
                             )}
                             {renderReactions(msg)}
                             {renderThreadIndicator(msg)}
+                            {renderSeenStatus(msg)}
                           </div>
                         </>
                       );
