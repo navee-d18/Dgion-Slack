@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
-import { 
-  Hash, Lock, Search, Users, Menu, Send, Bold, Italic, 
-  Strikethrough, Code, Link, Paperclip, Smile, HelpCircle, 
-  MoreHorizontal, MessageSquare, Bookmark, SmilePlus, Loader2, Settings, Briefcase,
-  X, FileText, Trash2, Edit, Bell, BellOff, Pin, Mic
+import {
+  Hash, Lock, Search, Users, Menu, Send, Bold, Italic,
+  Strikethrough, Code, Link, Paperclip, Smile, HelpCircle,
+  MoreHorizontal, MessageSquare, Bookmark, SmilePlus, Loader2, Settings,
+  X, Trash2, Edit, Bell, Pin, Mic
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -72,8 +72,7 @@ const formatDateHeader = (date) => {
 export const formatReminderTime = (ts) => {
   if (!ts) return '';
   const d = ts.toDate ? ts.toDate() : new Date(ts);
-  const now = new Date();
-  
+
   const timeString = d.toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
@@ -104,7 +103,6 @@ export const parseReminderCommand = (text) => {
     rest = rest.substring(3).trim(); // remove "me"
   }
   
-  const now = new Date();
   let scheduledAt = null;
   
   // 1. Check for relative duration: "in X mins/hours/secs"
@@ -260,7 +258,7 @@ export const renderFormattedContent = (content, members = []) => {
     const sortedMembers = [...members].sort((a, b) => b.name.length - a.name.length);
     sortedMembers.forEach(member => {
       // Escape special characters in member name for RegExp
-      const escapedName = member.name.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const escapedName = member.name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
       // Match exact name after '@', checking boundaries dynamically (space, punctuation, end of line, word boundaries)
       const regex = new RegExp(`@(${escapedName})(?=\\s|[.,!?]|$|\\b)`, 'g');
       html = html.replace(regex, `<span class="mention-link cursor-pointer text-[#1164A3] bg-[#E8F5FA] hover:bg-[#D0ECF7] px-1.5 py-0.5 rounded font-bold transition-colors select-none" data-uid="${member.id}">@$1</span>`);
@@ -381,7 +379,7 @@ const FullEmojiPicker = ({ onSelectEmoji, onClose }) => {
 
 import { emojiCategories, searchEmojis } from '../utils/emojiData';
 
-const VoiceNotePlayer = ({ file, messageId, activeAudioId, setActiveAudioId }) => {
+const VoiceNotePlayer = ({ file, messageId, setActiveAudioId }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -544,7 +542,6 @@ export default function ChatArea({
   onDeleteMessage,
   onEditMessage,
   onToggleReaction,
-  activeThreadMessageId,
   onOpenThread,
   onOpenSearch,
   onToggleRightPanel,
@@ -1369,7 +1366,7 @@ export default function ChatArea({
           block: 'center' 
         });
         
-        const timer = setTimeout(() => {
+        setTimeout(() => {
           if (clearHighlight) clearHighlight();
         }, 2000);
         
@@ -1530,7 +1527,7 @@ export default function ChatArea({
     <div className="flex-1 flex flex-col h-full bg-[#FFFFFF] relative min-w-0 font-sans" aria-label="Chat Area">
       
       {/* 1. TOP HEADER - TALLER, CLEAN WHITE, TIGHTER SPACING, #E8E8E8 border */}
-      <header className="h-[52px] bg-[#FFFFFF] border-b border-[#E8E8E8] px-6 flex items-center justify-between shrink-0 select-none">
+      <header className="h-[52px] bg-[#FFFFFF] border-b border-[#E8E8E8] px-3 sm:px-6 flex items-center justify-between gap-2 shrink-0 select-none">
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={onOpenMobileDrawer}

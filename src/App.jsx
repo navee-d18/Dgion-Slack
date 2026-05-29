@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import WorkspaceSidebar from './components/WorkspaceSidebar';
 import ChannelNav from './components/ChannelNav';
 import ChatArea from './components/ChatArea';
@@ -1103,7 +1103,10 @@ function SlackDashboard({ user, logout }) {
         if (isConfigured) {
           try {
             await updateDoc(doc(db, 'scheduled_messages', sMsg.id), { status: 'sent' });
-            await handleSendMessage(sMsg.content, sMsg.file || null, sMsg.parentMessageId || null);
+            await handleSendMessage(sMsg.content, sMsg.file || null, sMsg.parentMessageId || null, {
+              destinationId: sMsg.destinationId,
+              isDestinationDm: sMsg.isDestinationDm
+            });
           } catch (err) {
             console.error('Error sending Firestore scheduled message:', err);
           }
@@ -1113,7 +1116,10 @@ function SlackDashboard({ user, logout }) {
             const updated = allSched.map(m => m.id === sMsg.id ? { ...m, status: 'sent' } : m);
             localStorage.setItem('slack_scheduled_messages', JSON.stringify(updated));
 
-            await handleSendMessage(sMsg.content, sMsg.file || null, sMsg.parentMessageId || null);
+            await handleSendMessage(sMsg.content, sMsg.file || null, sMsg.parentMessageId || null, {
+              destinationId: sMsg.destinationId,
+              isDestinationDm: sMsg.isDestinationDm
+            });
             window.dispatchEvent(new Event('slack_local_scheduled_messages_update'));
           } catch (e) {
             console.error('Error sending local scheduled message:', e);
@@ -1567,8 +1573,14 @@ function SlackDashboard({ user, logout }) {
   };
 
   // Send Message write action
-  const handleSendMessage = async (content, fileAttachment = null, parentMessageId = null) => {
-    if (!activeWorkspaceId || !activeDestinationId || !user) return;
+  const handleSendMessage = async (content, fileAttachment = null, parentMessageId = null, target = null) => {
+    // Resolve the destination. Defaults to the currently-open conversation, but a
+    // `target` override lets the scheduler deliver to the conversation a message was
+    // scheduled FOR — not whatever happens to be open when the timer fires.
+    const destId = target?.destinationId ?? activeDestinationId;
+    const destIsDm = target?.isDestinationDm ?? isDestinationDm;
+
+    if (!activeWorkspaceId || !destId || !user) return;
 
     const now = new Date();
     let hours = now.getHours();
@@ -1581,10 +1593,10 @@ function SlackDashboard({ user, logout }) {
     // Mapped channel or DM name for previewing notifications
     const activeWorkspaceRaw = workspaces.find(ws => ws.id === activeWorkspaceId);
     let destName = '';
-    if (isDestinationDm) {
-      destName = activeWorkspaceRaw?.dms?.find(d => d.id === activeDestinationId)?.name || 'Direct Message';
+    if (destIsDm) {
+      destName = activeWorkspaceRaw?.dms?.find(d => d.id === destId)?.name || 'Direct Message';
     } else {
-      destName = activeWorkspaceRaw?.channels?.find(c => c.id === activeDestinationId)?.name || 'channel';
+      destName = activeWorkspaceRaw?.channels?.find(c => c.id === destId)?.name || 'channel';
     }
 
     if (isConfigured) {
@@ -1612,13 +1624,13 @@ function SlackDashboard({ user, logout }) {
           messageData.file = uploadedFile;
         }
 
-        if (isDestinationDm) {
-          const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
+        if (destIsDm) {
+          const sharedConversationId = [user.uid, destId].sort().join('_');
           messageData.conversationId = sharedConversationId;
-          messageData.receiverId = activeDestinationId;
-          messageData.channelId = activeDestinationId;
+          messageData.receiverId = destId;
+          messageData.channelId = destId;
         } else {
-          messageData.channelId = activeDestinationId;
+          messageData.channelId = destId;
         }
 
         const msgDocRef = await addDoc(collection(db, 'messages'), messageData);
@@ -1626,11 +1638,11 @@ function SlackDashboard({ user, logout }) {
         // ========================================================
         // 1.1. GENERATE FIRESTORE REALTIME NOTIFICATIONS
         // ========================================================
-        if (isDestinationDm) {
+        if (destIsDm) {
           // Direct Message: Create exactly 1 notification document for the recipient
           const notificationData = {
             workspaceId: activeWorkspaceId,
-            userId: activeDestinationId,
+            userId: destId,
             senderId: user.uid,
             senderName: user.name,
             senderAvatar: user.avatarInitials,
@@ -1643,7 +1655,7 @@ function SlackDashboard({ user, logout }) {
             messageId: msgDocRef.id,
             createdAt: serverTimestamp()
           };
-          console.log('✉️ Creating DM notification in Firestore for recipient:', activeDestinationId, notificationData);
+          console.log('✉️ Creating DM notification in Firestore for recipient:', destId, notificationData);
           await addDoc(collection(db, 'notifications'), notificationData);
         } else {
           // Channel Message or Thread Reply
@@ -1676,7 +1688,7 @@ function SlackDashboard({ user, logout }) {
                 senderAvatar: user.avatarInitials,
                 content: content || 'shared an attachment',
                 type: 'thread',
-                destinationId: activeDestinationId,
+                destinationId: destId,
                 destinationName: destName,
                 isDestinationDm: false,
                 isRead: false,
@@ -1704,7 +1716,7 @@ function SlackDashboard({ user, logout }) {
                   senderAvatar: user.avatarInitials,
                   content: content || 'shared an attachment',
                   type: notificationType,
-                  destinationId: activeDestinationId,
+                  destinationId: destId,
                   destinationName: destName,
                   isDestinationDm: false,
                   isRead: false,
@@ -1722,7 +1734,6 @@ function SlackDashboard({ user, logout }) {
       }
     } else {
       // 2. Emulator LocalStorage write
-      const channelKey = `${activeWorkspaceId}-${activeDestinationId}`;
       const newMsgId = `msg-${Date.now()}`;
       const newMessage = {
         id: newMsgId,
@@ -1743,13 +1754,13 @@ function SlackDashboard({ user, logout }) {
         newMessage.file = fileAttachment;
       }
 
-      if (isDestinationDm) {
-        const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
+      if (destIsDm) {
+        const sharedConversationId = [user.uid, destId].sort().join('_');
         newMessage.conversationId = sharedConversationId;
-        newMessage.receiverId = activeDestinationId;
-        newMessage.channelId = activeDestinationId;
+        newMessage.receiverId = destId;
+        newMessage.channelId = destId;
       } else {
-        newMessage.channelId = activeDestinationId;
+        newMessage.channelId = destId;
       }
 
       const allMessages = JSON.parse(localStorage.getItem('slack_messages') || '[]');
@@ -1761,12 +1772,12 @@ function SlackDashboard({ user, logout }) {
       // 1.2. GENERATE EMULATOR REALTIME NOTIFICATIONS
       // ========================================================
       const membersList = activeWorkspaceRaw?.members || [];
-      if (isDestinationDm) {
-        const localNotifications = JSON.parse(localStorage.getItem(`slack_notifications_user_${activeDestinationId}`) || '[]');
+      if (destIsDm) {
+        const localNotifications = JSON.parse(localStorage.getItem(`slack_notifications_user_${destId}`) || '[]');
         localNotifications.push({
           id: `notif-${Date.now()}`,
           workspaceId: activeWorkspaceId,
-          userId: activeDestinationId,
+          userId: destId,
           senderId: user.uid,
           senderName: user.name,
           senderAvatar: user.avatarInitials,
@@ -1779,7 +1790,7 @@ function SlackDashboard({ user, logout }) {
           messageId: newMsgId,
           createdAt: Date.now()
         });
-        localStorage.setItem(`slack_notifications_user_${activeDestinationId}`, JSON.stringify(localNotifications));
+        localStorage.setItem(`slack_notifications_user_${destId}`, JSON.stringify(localNotifications));
       } else {
         for (const memberUid of membersList) {
           if (memberUid !== user.uid) {
@@ -1797,7 +1808,7 @@ function SlackDashboard({ user, logout }) {
               senderAvatar: user.avatarInitials,
               content: content || 'shared an attachment',
               type: notificationType,
-              destinationId: activeDestinationId,
+              destinationId: destId,
               destinationName: destName,
               isDestinationDm: false,
               isRead: false,
@@ -1890,8 +1901,7 @@ function SlackDashboard({ user, logout }) {
   const formatReminderTimeHelper = (ts) => {
     if (!ts) return '';
     const d = ts.toDate ? ts.toDate() : new Date(ts);
-    const now = new Date();
-    
+
     const timeString = d.toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',

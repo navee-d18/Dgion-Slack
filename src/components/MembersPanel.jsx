@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { X, Mail, Globe, Briefcase, ArrowLeft, Plus } from 'lucide-react';
 
 export default function MembersPanel({ 
@@ -31,7 +31,7 @@ export default function MembersPanel({
 
   return (
     <div 
-      className="absolute inset-0 z-30 sm:relative sm:inset-auto sm:z-auto w-full sm:w-[260px] border-l border-[#E8E8E8] flex flex-col h-full bg-[#FFFFFF] select-none shrink-0 animate-in slide-in-from-right duration-100 font-sans"
+      className="absolute inset-0 z-30 lg:relative lg:inset-auto lg:z-auto w-full lg:w-[260px] border-l border-[#E8E8E8] flex flex-col h-full bg-[#FFFFFF] select-none shrink-0 animate-in slide-in-from-right duration-100 font-sans"
       aria-label="Workspace members"
     >
       {/* MEMBERS LIST VIEW */}
@@ -69,7 +69,6 @@ export default function MembersPanel({
             </p>
             {activeWorkspace.dms.map(member => {
               const isThisMemberCreator = activeWorkspace.createdBy === member.id;
-              const displayRole = isThisMemberCreator ? 'Workspace Owner' : 'Workspace Member';
               const emailText = member.email || `${member.id}@acme-corp.com`;
 
               return (

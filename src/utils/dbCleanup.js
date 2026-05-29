@@ -1,7 +1,7 @@
 import { doc, deleteDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
 
-export async function purgeAllDemoData(uid) {
+export async function purgeAllDemoData() {
   try {
     console.log('🧹 Purging all system-seeded demo documents from Firestore client-side...');
 

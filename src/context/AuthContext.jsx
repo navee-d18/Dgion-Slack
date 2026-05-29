@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
 import { isConfigured, auth, db } from '../firebase';
 
 // Real Firebase Auth dependencies
@@ -18,7 +18,7 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [mode, setMode] = useState(isConfigured ? 'firebase' : 'emulated');
+  const [mode] = useState(isConfigured ? 'firebase' : 'emulated');
 
   // Helper: extract initials from user full name
   const getInitials = (name) => {

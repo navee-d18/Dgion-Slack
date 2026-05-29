@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { ChevronDown, ChevronRight, Hash, Lock, Plus, Settings, Bell, HelpCircle, LogOut } from 'lucide-react';
 
 export default function ChannelNav({

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  X, Send, Bold, Italic, Strikethrough, Code, Link, 
-  Paperclip, Smile, MessageSquare, Bookmark, SmilePlus, Loader2,
-  Trash2, Edit, HelpCircle, FileText, MoreHorizontal
+import {
+  X, Send, Bold, Italic, Strikethrough, Code, Link,
+  Paperclip, Smile, Bookmark, SmilePlus,
+  Trash2, Edit, MoreHorizontal
 } from 'lucide-react';
 import { emojiCategories, searchEmojis } from '../utils/emojiData';
 
@@ -70,8 +70,7 @@ const getMessageDate = (msg) => {
 const formatReminderTime = (ts) => {
   if (!ts) return '';
   const d = ts.toDate ? ts.toDate() : new Date(ts);
-  const now = new Date();
-  
+
   const timeString = d.toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
@@ -261,7 +260,7 @@ const SearchIcon = ({ className }) => (
   </svg>
 );
 
-const VoiceNotePlayer = ({ file, messageId, activeAudioId, setActiveAudioId }) => {
+const VoiceNotePlayer = ({ file, messageId, setActiveAudioId }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -768,7 +767,7 @@ export default function ThreadPanel({
     : `#${activeWorkspace?.channels?.find(c => c.id === activeDestinationId)?.name || 'channel'}`;
 
   return (
-    <div className="absolute inset-0 z-30 sm:relative sm:inset-auto sm:z-[20] w-full sm:w-[400px] border-l border-[#E8E8E8] h-full flex flex-col bg-[#FFFFFF] shrink-0 font-sans shadow-sm overflow-hidden">
+    <div className="absolute inset-0 z-30 lg:relative lg:inset-auto lg:z-[20] w-full lg:w-[400px] border-l border-[#E8E8E8] h-full flex flex-col bg-[#FFFFFF] shrink-0 font-sans shadow-sm overflow-hidden">
       
       {/* HEADER */}
       <header className="h-[52px] bg-[#FFFFFF] border-b border-[#E8E8E8] px-4 flex items-center justify-between shrink-0 select-none">

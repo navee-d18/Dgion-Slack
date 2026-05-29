@@ -46,7 +46,7 @@ export function playNotificationSound() {
 
         osc2.start();
         osc2.stop(ctx.currentTime + 0.35);
-      } catch (e) {
+      } catch {
         // Safe catch for closed audio context
       }
     }, 75);

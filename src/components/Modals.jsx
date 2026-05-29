@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Hash, Lock, Search, MessageSquare, Briefcase, Mail, Settings, Trash2, Bell, HelpCircle, Copy, Check, Calendar, Clock, Edit3, User, MessageCircle } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { X, Hash, Lock, Search, MessageSquare, Briefcase, Mail, Copy, Check, Calendar, Clock, Edit3 } from 'lucide-react';
 
 // Firestore Search Queries
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
@@ -1759,17 +1759,17 @@ export function UserProfileModal({
   currentUser,
   isCreator
 }) {
-  if (!isOpen || !user) return null;
-
-  // Resolve user dynamically from workspace members list for instant real-time updates
-  const resolvedUser = allMembers.find(m => m.id === user.id) || user;
+  // Resolve user dynamically from workspace members list for instant real-time
+  // updates. Null-safe: all hooks below must run on every render (React rules of
+  // hooks), so the early return now comes AFTER them — `user` may be null here.
+  const resolvedUser = allMembers.find(m => m.id === user?.id) || user || {};
   const isUnavailable = resolvedUser.isUnavailable;
   const isSelf = resolvedUser.id === currentUser?.uid;
 
   // Editing states
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isChangingStatus, setIsChangingStatus] = useState(false);
-  
+
   // Fields state
   const [editName, setEditName] = useState(resolvedUser.name || '');
   const [editRole, setEditRole] = useState(resolvedUser.role || 'Workspace Member');
@@ -1795,6 +1795,9 @@ export function UserProfileModal({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
+
+  // Hooks are all above this guard so the hook order stays stable across renders.
+  if (!isOpen || !user) return null;
 
   const getAvatarColorClass = (name) => {
     const colors = [

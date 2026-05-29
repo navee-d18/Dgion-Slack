@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { User, Lock, Mail, AlertCircle, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 export default function AuthScreens() {
-  const { signIn, signUp, signInWithGoogle, loading, mode } = useAuth();
+  const { signIn, signUp, signInWithGoogle, mode } = useAuth();
   const [isLogin, setIsLogin] = useState(true); // Toggle between Login and Signup
   
   // Form fields
