@@ -55,7 +55,13 @@ service cloud.firestore {
 
     // 4. Messages Collection Rules
     match /messages/{messageId} {
-      allow read: if isSignedIn() && isMemberOfWorkspace(resource.data.workspaceId);
+      allow read: if isSignedIn() && isMemberOfWorkspace(resource.data.workspaceId) && (
+        // Channel messages (no conversationId) are readable by any workspace member
+        !('conversationId' in resource.data)
+        // Direct messages are private: only the sender or the receiver may read them
+        || request.auth.uid == resource.data.senderId
+        || request.auth.uid == resource.data.receiverId
+      );
       allow create: if isSignedIn() && isMemberOfWorkspace(request.resource.data.workspaceId);
       allow update: if isSignedIn() && (
         // Sender of the message can edit/delete their own message

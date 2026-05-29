@@ -1,0 +1,14 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Message attachments live under attachments/{uid}/...
+    match /attachments/{uid}/{fileName} {
+      // Any signed-in user may read an attachment via its (unguessable) download URL.
+      allow read: if request.auth != null;
+      // A user may only upload into their own folder, capped at 5MB.
+      allow write: if request.auth != null
+                   && request.auth.uid == uid
+                   && request.resource.size < 5 * 1024 * 1024;
+    }
+  }
+}

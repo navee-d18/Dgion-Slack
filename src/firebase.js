@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 
 // Vite environment variables loading standard
 const firebaseConfig = {
@@ -21,12 +22,14 @@ const isConfigured =
 let app;
 let auth;
 let db;
+let storage;
 
 if (isConfigured) {
   try {
     app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
+    storage = getStorage(app);
     console.log('⚡ Firebase Cloud Authentication successfully initialized.');
   } catch (error) {
     console.error('❌ Failed to initialize Firebase SDK:', error);
@@ -38,4 +41,4 @@ if (isConfigured) {
   );
 }
 
-export { app, auth, db, isConfigured };
+export { app, auth, db, storage, isConfigured };

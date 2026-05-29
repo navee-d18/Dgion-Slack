@@ -34,6 +34,7 @@ import {
 } from 'firebase/firestore';
 import { db, isConfigured } from './firebase';
 import { purgeAllDemoData } from './utils/dbCleanup';
+import { uploadAttachment } from './utils/storage';
 
 // Rich fallback database (when running in Local Developer Emulation Mode)
 const INITIAL_WORKSPACES = [];
@@ -92,8 +93,14 @@ function SlackDashboard({ user, logout }) {
   // ========================================================
   useEffect(() => {
     if (isConfigured && user) {
-      // Run once client-side under user's active authenticated session to delete demo logs
-      purgeAllDemoData(user.uid);
+      // One-time demo cleanup. Previously this scanned the ENTIRE messages
+      // collection on every login (O(all messages) reads per session). Gate it
+      // behind a persistent flag so it runs at most once per browser.
+      const PURGE_FLAG = 'slack_demo_purge_done';
+      if (localStorage.getItem(PURGE_FLAG) === 'true') return;
+      purgeAllDemoData(user.uid).finally(() => {
+        localStorage.setItem(PURGE_FLAG, 'true');
+      });
     }
   }, [user]);
 
@@ -1488,6 +1495,10 @@ function SlackDashboard({ user, logout }) {
     if (isConfigured) {
       // 1. Cloud Firestore write
       try {
+        // Upload any attachment to Firebase Storage and keep only the hosted URL
+        // in Firestore (base64 in-doc would blow past the 1MB document limit).
+        const uploadedFile = await uploadAttachment(fileAttachment, user.uid);
+
         const messageData = {
           workspaceId: activeWorkspaceId,
           senderId: user.uid,
@@ -1502,8 +1513,8 @@ function SlackDashboard({ user, logout }) {
           messageData.parentMessageId = parentMessageId;
         }
 
-        if (fileAttachment) {
-          messageData.file = fileAttachment;
+        if (uploadedFile) {
+          messageData.file = uploadedFile;
         }
 
         if (isDestinationDm) {
@@ -1723,12 +1734,16 @@ function SlackDashboard({ user, logout }) {
       createdAt: Date.now()
     };
 
-    if (fileAttachment) {
-      scheduledData.file = fileAttachment;
-    }
-
     if (isConfigured) {
       try {
+        // Upload attachment up-front so the scheduled_messages doc stores a hosted
+        // URL, not base64. When the message later fires, handleSendMessage receives
+        // the already-hosted URL and uploadAttachment passes it through unchanged.
+        const uploadedFile = await uploadAttachment(fileAttachment, user.uid);
+        if (uploadedFile) {
+          scheduledData.file = uploadedFile;
+        }
+
         await addDoc(collection(db, 'scheduled_messages'), {
           ...scheduledData,
           scheduledAt: new Date(scheduledAt),
@@ -1738,6 +1753,9 @@ function SlackDashboard({ user, logout }) {
         console.error('Error writing scheduled message to Firestore:', err);
       }
     } else {
+      if (fileAttachment) {
+        scheduledData.file = fileAttachment;
+      }
       try {
         const allSched = JSON.parse(localStorage.getItem('slack_scheduled_messages') || '[]');
         const newItem = {

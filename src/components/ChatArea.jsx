@@ -926,8 +926,8 @@ export default function ChatArea({
     const file = e.target.files[0];
     if (!file) return;
 
-    if (file.size > 800 * 1024) {
-      alert("File size exceeds 800 KB limit. Please upload a smaller file for this demo clone.");
+    if (file.size > 2 * 1024 * 1024) {
+      alert("File size exceeds 2 MB limit. Please upload a smaller file.");
       return;
     }
 
