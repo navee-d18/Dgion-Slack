@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import {
   Hash, Lock, Search, Users, Menu, Send, Bold, Italic,
   Strikethrough, Code, Link, Paperclip, Smile, HelpCircle,
@@ -626,6 +626,15 @@ export default function ChatArea({
 
   const channelKey = activeWorkspace ? `${activeWorkspace.id}-${activeDestinationId}` : '';
   const activeMessages = messages[channelKey] || [];
+  // Id of the most-recent (bottom-most) own real message — the read-status
+  // indicator is shown only on this message (WhatsApp/iMessage/Slack style).
+  const lastOwnMessageId = useMemo(() => {
+    for (let i = activeMessages.length - 1; i >= 0; i--) {
+      const m = activeMessages[i];
+      if (m && m.senderId === user?.uid && !m.isEphemeral && !m.deletedForEveryone) return m.id;
+    }
+    return null;
+  }, [activeMessages, user?.uid]);
   // Full pin count comes from the dedicated pinned query, not the paginated window.
   const pinnedCount = pinnedMessages.length;
 
@@ -896,6 +905,7 @@ export default function ChatArea({
   const renderSeenStatus = (msg) => {
     if (!msg || !user || msg.senderId !== user.uid) return null;
     if (msg.isEphemeral || msg.deletedForEveryone) return null;
+    if (msg.id !== lastOwnMessageId) return null;
     const msgMs = getReceiptMillis(msg.createdAt);
     if (!msgMs) return null;
 
@@ -911,11 +921,7 @@ export default function ChatArea({
       }
       // Delivered: recipient online now, or online after the message was sent.
       const recipientMember = activeWorkspace?.allWorkspaceMembers?.find(m => m.id === activeDestinationId);
-      const isOnline = recipientMember && (
-        recipientMember.presenceStatus === 'online' ||
-        recipientMember.onlineStatus === 'online' ||
-        recipientMember.status === 'online'
-      );
+      const isOnline = recipientMember && recipientMember.status === 'online';
       const presenceMs = recipientMember ? getReceiptMillis(recipientMember.lastSeenAt) : 0;
       if (isOnline || (presenceMs && presenceMs >= msgMs)) {
         return (

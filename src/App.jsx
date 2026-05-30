@@ -66,6 +66,7 @@ function SlackDashboard({ user, logout }) {
   const [pinnedMessages, setPinnedMessages] = useState([]);
   // Read receipts for the active conversation (per-user lastReadAt) → Seen/Delivered status.
   const [readReceipts, setReadReceipts] = useState([]);
+  const [focusTick, setFocusTick] = useState(0);
 
   const latestUsersRef = useRef(allRegisteredUsers);
   useEffect(() => {
@@ -688,6 +689,17 @@ function SlackDashboard({ user, logout }) {
     };
   }, [isConfigured, activeWorkspaceId, activeConversationKey, user]);
 
+  // Re-trigger mark-as-read when the tab regains focus / becomes visible.
+  useEffect(() => {
+    const bump = () => setFocusTick(t => t + 1);
+    window.addEventListener('focus', bump);
+    document.addEventListener('visibilitychange', bump);
+    return () => {
+      window.removeEventListener('focus', bump);
+      document.removeEventListener('visibilitychange', bump);
+    };
+  }, []);
+
   // 3. Mark the active conversation read (own lastReadAt) — focus-aware + throttled.
   const lastReadWriteRef = useRef({ key: '', at: 0 });
   const activeMessagesCount = messages[`${activeWorkspaceId}-${activeDestinationId}`]?.length || 0;
@@ -722,7 +734,7 @@ function SlackDashboard({ user, logout }) {
         console.warn('Failed to write local read receipt:', e);
       }
     }
-  }, [user, activeWorkspaceId, activeConversationKey, isDestinationDm, activeMessagesCount]);
+  }, [user, activeWorkspaceId, activeConversationKey, isDestinationDm, activeMessagesCount, focusTick]);
 
   // ========================================================
   // 5.5. REAL-TIME OBSERVER: NOTIFICATIONS (FIRESTORE MODE)
@@ -2877,6 +2889,7 @@ function SlackDashboard({ user, logout }) {
       email: u.email,
       avatar: u.avatarInitials,
       status: u.presenceStatus || u.onlineStatus || 'offline',
+      lastSeenAt: u.lastSeenAt || null,
       role: roleText
     };
   });
