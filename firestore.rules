@@ -55,14 +55,21 @@ service cloud.firestore {
 
     // 4. Messages Collection Rules
     match /messages/{messageId} {
-      // Read is workspace-membership based. DM privacy is NOT enforced at the rules
-      // level: Firestore evaluates list queries by static analysis ("rules are not
-      // filters"), so a conversationId-filtered DM query cannot prove a sender/
-      // receiver check and adding one rejects the whole query. True rules-level DM
-      // privacy needs a `participants` array on each message + an array-contains
-      // query (+ a backfill for existing messages). DM scoping is currently done
-      // client-side (queries only the user's own conversations).
-      allow read: if isSignedIn() && isMemberOfWorkspace(resource.data.workspaceId);
+      // DM privacy IS enforced at the rules level via two OR'd read statements. A
+      // query is permitted only when its constraints make ONE statement provably
+      // true ("rules are not filters"):
+      //   - Channel messages: any workspace member, and only for non-DM docs. The
+      //     channel query must carry `isDm == false` so this statement proves.
+      //   - DM messages: only a participant. The DM query must carry
+      //     `participants array-contains <uid>` so `request.auth.uid in participants`
+      //     proves. A member cannot read another pair's DMs — not even the owner.
+      // Every message doc therefore carries `isDm` (bool); DM docs also carry
+      // `participants: [a, b]`. Existing docs are backfilled before this deploys
+      // (scripts/backfill-dm-participants.mjs).
+      allow read: if isMemberOfWorkspace(resource.data.workspaceId)
+        && resource.data.isDm == false;
+      allow read: if isMemberOfWorkspace(resource.data.workspaceId)
+        && request.auth.uid in resource.data.participants;
       allow create: if isSignedIn() && isMemberOfWorkspace(request.resource.data.workspaceId);
       allow update: if isSignedIn() && (
         // Sender of the message can edit/delete their own message

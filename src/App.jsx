@@ -541,21 +541,27 @@ function SlackDashboard({ user, logout }) {
 
     let q;
     if (isDestinationDm) {
-      // Direct message query: watch the shared conversation ID (latest page only)
+      // Direct message query: watch the shared conversation ID (latest page only).
+      // `participants array-contains uid` makes the read provably safe under the
+      // DM-privacy rule ("rules are not filters" — the rule's `uid in participants`
+      // can only pass when the query itself constrains participants).
       const sharedConversationId = dmConversationId(user.uid, activeDestinationId);
       q = query(
         collection(db, 'messages'),
         where('workspaceId', '==', activeWorkspaceId),
         where('conversationId', '==', sharedConversationId),
+        where('participants', 'array-contains', user.uid),
         orderBy('createdAt', 'desc'),
         limit(messageLimit)
       );
     } else {
-      // Channel message query: watch the channel ID (latest page only)
+      // Channel message query: watch the channel ID (latest page only). isDm==false
+      // keeps DM docs out and lets the channel read rule (member + isDm==false) prove.
       q = query(
         collection(db, 'messages'),
         where('workspaceId', '==', activeWorkspaceId),
         where('channelId', '==', activeDestinationId),
+        where('isDm', '==', false),
         orderBy('createdAt', 'desc'),
         limit(messageLimit)
       );
@@ -620,6 +626,7 @@ function SlackDashboard({ user, logout }) {
         collection(db, 'messages'),
         where('workspaceId', '==', activeWorkspaceId),
         where('conversationId', '==', sharedConversationId),
+        where('participants', 'array-contains', user.uid),
         where('isPinned', '==', true)
       );
     } else {
@@ -627,6 +634,7 @@ function SlackDashboard({ user, logout }) {
         collection(db, 'messages'),
         where('workspaceId', '==', activeWorkspaceId),
         where('channelId', '==', activeDestinationId),
+        where('isDm', '==', false),
         where('isPinned', '==', true)
       );
     }
@@ -1729,8 +1737,14 @@ function SlackDashboard({ user, logout }) {
           messageData.conversationId = sharedConversationId;
           messageData.receiverId = destId;
           messageData.channelId = destId;
+          // participants drives rules-level DM privacy: the read rule allows a DM
+          // message only when request.auth.uid is in this array, and the DM query
+          // filters by `array-contains uid` so the rule is provable.
+          messageData.isDm = true;
+          messageData.participants = [user.uid, destId];
         } else {
           messageData.channelId = destId;
+          messageData.isDm = false;
         }
 
         const msgDocRef = await addDoc(collection(db, 'messages'), messageData);
@@ -1859,8 +1873,11 @@ function SlackDashboard({ user, logout }) {
         newMessage.conversationId = sharedConversationId;
         newMessage.receiverId = destId;
         newMessage.channelId = destId;
+        newMessage.isDm = true;
+        newMessage.participants = [user.uid, destId];
       } else {
         newMessage.channelId = destId;
+        newMessage.isDm = false;
       }
 
       const allMessages = JSON.parse(localStorage.getItem('slack_messages') || '[]');
@@ -2047,8 +2064,13 @@ function SlackDashboard({ user, logout }) {
           messageData.conversationId = sharedConversationId;
           messageData.receiverId = activeDestinationId;
           messageData.channelId = activeDestinationId;
+          // The Slackbot reminder lives in the user↔destination DM, so its
+          // participants are the two humans of that conversation (not 'slackbot').
+          messageData.isDm = true;
+          messageData.participants = [user.uid, activeDestinationId];
         } else {
           messageData.channelId = activeDestinationId;
+          messageData.isDm = false;
         }
 
         await addDoc(collection(db, 'messages'), messageData);
@@ -2086,8 +2108,11 @@ function SlackDashboard({ user, logout }) {
           localMsg.conversationId = sharedConversationId;
           localMsg.receiverId = activeDestinationId;
           localMsg.channelId = activeDestinationId;
+          localMsg.isDm = true;
+          localMsg.participants = [user.uid, activeDestinationId];
         } else {
           localMsg.channelId = activeDestinationId;
+          localMsg.isDm = false;
         }
 
         allMessages.push(localMsg);
@@ -2548,12 +2573,21 @@ function SlackDashboard({ user, logout }) {
     if (!user) return;
     if (isConfigured) {
       try {
-        // 1. Delete associated messages
-        const msgSnap = await getDocs(query(collection(db, 'messages'), where('workspaceId', '==', workspaceId)));
+        // 1. Delete associated CHANNEL messages. Under strict DM privacy the owner
+        // cannot READ other members' DM docs (the read rule only allows participants),
+        // so a `workspaceId`-only query would be rejected. We delete channel messages
+        // here (isDm==false, equality-only — no composite index needed); DM docs in a
+        // deleted workspace become orphaned (inaccessible anyway) and are purged out of
+        // band via scripts/backfill-dm-participants.mjs --purge-orphans if desired.
+        const msgSnap = await getDocs(query(
+          collection(db, 'messages'),
+          where('workspaceId', '==', workspaceId),
+          where('isDm', '==', false)
+        ));
         for (const docRef of msgSnap.docs) {
           await deleteDoc(docRef.ref);
         }
-        
+
         // 2. Delete associated channels
         const chanSnap = await getDocs(query(collection(db, 'channels'), where('workspaceId', '==', workspaceId)));
         for (const docRef of chanSnap.docs) {
