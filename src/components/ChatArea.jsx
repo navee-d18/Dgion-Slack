@@ -6,93 +6,7 @@ import {
   X, Trash2, Edit, Bell, Pin, Mic, Check, CheckCheck, Eye
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-
-// Module-level helper functions
-const getAvatarColorClass = (name) => {
-  const colors = [
-    'bg-[#E01E5A]', 'bg-[#36C5F0]', 'bg-[#2BAC76]', 
-    'bg-[#ECB22E]', 'bg-[#613064]', 'bg-[#1164A3]'
-  ];
-  let sum = 0;
-  for (let i = 0; i < name.length; i++) sum += name.charCodeAt(i);
-  return colors[sum % colors.length];
-};
-
-const getInitials = (name) => {
-  if (!name) return 'US';
-  return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-};
-
-// Helper to parse simple calendar Date for a message
-const getMessageDate = (msg) => {
-  if (msg.createdAt) {
-    if (typeof msg.createdAt.toDate === 'function') {
-      return msg.createdAt.toDate();
-    }
-    if (msg.createdAt.seconds) {
-      return new Date(msg.createdAt.seconds * 1000);
-    }
-    return new Date(msg.createdAt);
-  }
-  if (msg.id && msg.id.startsWith('msg-')) {
-    const ts = parseInt(msg.id.replace('msg-', ''), 10);
-    if (!isNaN(ts)) {
-      return new Date(ts);
-    }
-  }
-  return new Date(); // fallback
-};
-
-// Check if two dates represent the same calendar day
-const isSameDay = (date1, date2) => {
-  if (!date1 || !date2) return false;
-  return date1.toDateString() === date2.toDateString();
-};
-
-// Format date separator text ("Today", "Yesterday", or "May 27, 2026")
-const formatDateHeader = (date) => {
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-
-  if (date.toDateString() === today.toDateString()) {
-    return 'Today';
-  } else if (date.toDateString() === yesterday.toDateString()) {
-    return 'Yesterday';
-  } else {
-    return date.toLocaleDateString('en-US', {
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  }
-};
-
-
-export const formatReminderTime = (ts) => {
-  if (!ts) return '';
-  const d = ts.toDate ? ts.toDate() : new Date(ts);
-
-  const timeString = d.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true
-  });
-  
-  const today = new Date();
-  const tomorrow = new Date();
-  tomorrow.setDate(today.getDate() + 1);
-  
-  if (d.toDateString() === today.toDateString()) {
-    return `Today ${timeString}`;
-  } else if (d.toDateString() === tomorrow.toDateString()) {
-    return `Tomorrow ${timeString}`;
-  } else {
-    const month = d.toLocaleDateString('en-US', { month: 'short' });
-    const day = d.getDate();
-    return `${month} ${day} at ${timeString}`;
-  }
-};
+import { getInitials, getAvatarColorClass } from '../utils/avatar';
 
 export const parseReminderCommand = (text) => {
   let rest = text.trim();
@@ -378,7 +292,7 @@ const FullEmojiPicker = ({ onSelectEmoji, onClose }) => {
 };
 
 import { emojiCategories, searchEmojis } from '../utils/emojiData';
-import { getReceiptMillis, dmSeenState, isScheduleTimeInvalid } from '../utils/datetime';
+import { getReceiptMillis, dmSeenState, isScheduleTimeInvalid, getMessageDate, isSameDay, formatDateHeader, formatReminderTime } from '../utils/datetime';
 
 const VoiceNotePlayer = ({ file, messageId, setActiveAudioId }) => {
   const [isPlaying, setIsPlaying] = useState(false);

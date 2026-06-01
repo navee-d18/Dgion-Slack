@@ -38,6 +38,7 @@ import { db, isConfigured } from './firebase';
 import { purgeAllDemoData } from './utils/dbCleanup';
 import { uploadAttachment } from './utils/storage';
 import { dmConversationId, conversationKey } from './utils/conversation';
+import { formatReminderTime } from './utils/datetime';
 
 // Rich fallback database (when running in Local Developer Emulation Mode)
 const INITIAL_WORKSPACES = [];
@@ -1997,31 +1998,6 @@ function SlackDashboard({ user, logout }) {
     }
   };
 
-  const formatReminderTimeHelper = (ts) => {
-    if (!ts) return '';
-    const d = ts.toDate ? ts.toDate() : new Date(ts);
-
-    const timeString = d.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
-    
-    const today = new Date();
-    const tomorrow = new Date();
-    tomorrow.setDate(today.getDate() + 1);
-    
-    if (d.toDateString() === today.toDateString()) {
-      return `Today ${timeString}`;
-    } else if (d.toDateString() === tomorrow.toDateString()) {
-      return `Tomorrow ${timeString}`;
-    } else {
-      const month = d.toLocaleDateString('en-US', { month: 'short' });
-      const day = d.getDate();
-      return `${month} ${day} at ${timeString}`;
-    }
-  };
-
   const handleScheduleReminder = async (text, scheduledAt) => {
     if (!activeWorkspaceId || !activeDestinationId || !user) return;
 
@@ -2058,7 +2034,7 @@ function SlackDashboard({ user, logout }) {
           senderId: 'slackbot',
           senderName: 'Slackbot',
           avatar: 'SB',
-          content: `📅 Reminder set for ${formatReminderTimeHelper(scheduledAt)}: "${text}"`,
+          content: `📅 Reminder set for ${formatReminderTime(scheduledAt)}: "${text}"`,
           timestamp: timeString,
           createdAt: serverTimestamp(),
           isEphemeral: true,
@@ -2097,7 +2073,7 @@ function SlackDashboard({ user, logout }) {
           senderId: 'slackbot',
           senderName: 'Slackbot',
           avatar: 'SB',
-          content: `📅 Reminder set for ${formatReminderTimeHelper(scheduledAt)}: "${text}"`,
+          content: `📅 Reminder set for ${formatReminderTime(scheduledAt)}: "${text}"`,
           timestamp: timeString,
           createdAt: Date.now(),
           isEphemeral: true,

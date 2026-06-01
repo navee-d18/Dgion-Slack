@@ -12,6 +12,7 @@ import {
   signInWithPopup
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
+import { getInitials } from '../utils/avatar';
 
 const AuthContext = createContext(null);
 
@@ -19,11 +20,6 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mode] = useState(isConfigured ? 'firebase' : 'emulated');
-
-  // Helper: extract initials from user full name
-  const getInitials = (name) => {
-    return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-  };
 
   // ========================================================
   // SESSION PERSISTENCE & LISTENER

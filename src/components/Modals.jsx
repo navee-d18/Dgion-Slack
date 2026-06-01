@@ -4,6 +4,7 @@ import { X, Hash, Lock, Search, MessageSquare, Briefcase, Mail, Copy, Check, Cal
 // Firestore Search Queries
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db, isConfigured } from '../firebase';
+import { getInitials, getAvatarColorClass } from '../utils/avatar';
 
 // Create Channel Modal
 export function CreateChannelModal({ isOpen, onClose, onCreate }) {
@@ -1798,20 +1799,6 @@ export function UserProfileModal({
 
   // Hooks are all above this guard so the hook order stays stable across renders.
   if (!isOpen || !user) return null;
-
-  const getAvatarColorClass = (name) => {
-    const colors = [
-      'bg-[#E01E5A]', 'bg-[#36C5F0]', 'bg-[#2BAC76]', 
-      'bg-[#ECB22E]', 'bg-[#613064]', 'bg-[#1164A3]'
-    ];
-    let sum = 0;
-    for (let i = 0; i < name.length; i++) sum += name.charCodeAt(i);
-    return colors[sum % colors.length];
-  };
-
-  const getInitials = (name) => {
-    return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-  };
 
   const handleCopyEmail = () => {
     if (!resolvedUser.email) return;

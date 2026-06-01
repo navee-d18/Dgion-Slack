@@ -1,5 +1,6 @@
 import { X, Pin, FileText, Image as ImageIcon } from 'lucide-react';
 import { renderFormattedContent } from './ChatArea';
+import { getInitials, getAvatarColorClass } from '../utils/avatar';
 
 export default function PinnedPanel({
   activeWorkspace,
@@ -17,20 +18,6 @@ export default function PinnedPanel({
 
   // Pinned messages are passed in pre-filtered (full set, pagination-independent).
   const pinnedMsgs = pinnedMessages;
-
-  const getAvatarColorClass = (name) => {
-    const colors = [
-      'bg-[#E01E5A]', 'bg-[#36C5F0]', 'bg-[#2BAC76]', 
-      'bg-[#ECB22E]', 'bg-[#613064]', 'bg-[#1164A3]'
-    ];
-    let sum = 0;
-    for (let i = 0; i < name.length; i++) sum += name.charCodeAt(i);
-    return colors[sum % colors.length];
-  };
-
-  const getInitials = (name) => {
-    return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-  };
 
   // 3. Helper: Group pinned messages by date
   const groupMessagesByDate = (msgs) => {

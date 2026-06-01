@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { X, Mail, Globe, Briefcase, ArrowLeft, Plus } from 'lucide-react';
+import { getInitials, getAvatarColorClass } from '../utils/avatar';
 
 export default function MembersPanel({ 
   activeWorkspace, 
@@ -14,20 +15,6 @@ export default function MembersPanel({
   if (!activeWorkspace) return null;
 
   const isCreator = activeWorkspace.createdBy === currentUser?.uid;
-
-  const getAvatarColorClass = (name) => {
-    const colors = [
-      'bg-[#E01E5A]', 'bg-[#36C5F0]', 'bg-[#2BAC76]', 
-      'bg-[#ECB22E]', 'bg-[#613064]', 'bg-[#1164A3]'
-    ];
-    let sum = 0;
-    for (let i = 0; i < name.length; i++) sum += name.charCodeAt(i);
-    return colors[sum % colors.length];
-  };
-
-  const getInitials = (name) => {
-    return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-  };
 
   return (
     <div 
