@@ -3,14 +3,11 @@ import { db } from '../firebase';
 
 export async function purgeAllDemoData() {
   try {
-    console.log('🧹 Purging all system-seeded demo documents from Firestore client-side...');
-
     // 1. Delete workspaces
     const wsIds = ['acme-seed', 'design-seed', 'dev-seed'];
     for (const id of wsIds) {
       try {
         await deleteDoc(doc(db, 'workspaces', id));
-        console.log(`- Deleted workspace: ${id}`);
       } catch (e) {
         console.warn(`Could not delete workspace ${id}:`, e);
       }
@@ -24,7 +21,6 @@ export async function purgeAllDemoData() {
     for (const id of chIds) {
       try {
         await deleteDoc(doc(db, 'channels', id));
-        console.log(`- Deleted channel: ${id}`);
       } catch (e) {
         console.warn(`Could not delete channel ${id}:`, e);
       }
@@ -40,7 +36,6 @@ export async function purgeAllDemoData() {
           await deleteDoc(doc(db, 'messages', msgDoc.id));
         }
       }
-      console.log('- Cleaned demo messages.');
     } catch (e) {
       console.warn('Could not clean messages:', e);
     }
@@ -50,13 +45,10 @@ export async function purgeAllDemoData() {
     for (const id of demoUsers) {
       try {
         await deleteDoc(doc(db, 'users', id));
-        console.log(`- Deleted demo user: ${id}`);
       } catch (e) {
         console.warn(`Could not delete user ${id}:`, e);
       }
     }
-
-    console.log('✅ Client-side cleanup completed successfully!');
   } catch (error) {
     console.error('❌ Client-side database cleanup failed:', error);
   }

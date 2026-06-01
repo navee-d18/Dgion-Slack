@@ -410,7 +410,6 @@ function SlackDashboard({ user, logout }) {
           const diffMs = Date.now() - lastSeenMs;
           // If another active tab updated the heartbeat within 4.5 minutes, keep online status!
           if (diffMs < 4.5 * 60 * 1000) {
-            console.log('Skipping offline: user is active in another session/tab. lastSeen ago (ms):', diffMs);
             resetIdleTimer();
             return;
           }
@@ -765,7 +764,6 @@ function SlackDashboard({ user, logout }) {
           fetchedNotifications.push({ id: doc.id, ...data });
         }
       });
-      console.log('🔔 Loaded unread notifications for user:', user.uid, fetchedNotifications);
       setUnreadNotifications(fetchedNotifications);
     }, (err) => {
       console.warn('Notifications observer error:', err);
@@ -1092,7 +1090,6 @@ function SlackDashboard({ user, logout }) {
       });
 
       for (const rem of pendingReminders) {
-        console.log('⏰ Triggering reminder:', rem);
         if (isConfigured) {
           try {
             let triggerSuccess = false;
@@ -1106,7 +1103,6 @@ function SlackDashboard({ user, logout }) {
             });
 
             if (!triggerSuccess) {
-              console.log('Reminder already triggered by another session/tab.');
               continue;
             }
 
@@ -1153,7 +1149,6 @@ function SlackDashboard({ user, logout }) {
             });
 
             if (!triggerSuccess) {
-              console.log('Reminder already triggered by another session/tab (local).');
               continue;
             }
 
@@ -1207,7 +1202,6 @@ function SlackDashboard({ user, logout }) {
       });
 
       for (const sMsg of pendingMessages) {
-        console.log('📅 Sending scheduled message:', sMsg);
         if (isConfigured) {
           try {
             await updateDoc(doc(db, 'scheduled_messages', sMsg.id), { status: 'sent' });
@@ -1536,7 +1530,6 @@ function SlackDashboard({ user, logout }) {
   // Start typing status helper
   const handleTypingStart = async () => {
     if (!user || !activeWorkspaceId || !activeDestinationId) return;
-    console.log('✍️ handleTypingStart triggered in App.jsx for user:', user.name);
 
     // Dispatch event to instantly trigger presence update to online
     window.dispatchEvent(new CustomEvent('user-started-typing'));
@@ -1581,7 +1574,6 @@ function SlackDashboard({ user, logout }) {
   // Stop typing status helper
   const handleTypingStop = async () => {
     if (!user) return;
-    console.log('🛑 handleTypingStop triggered in App.jsx for user:', user.name);
 
     if (isConfigured) {
       try {
@@ -1609,7 +1601,6 @@ function SlackDashboard({ user, logout }) {
   // Start voice recording status helper
   const handleRecordingStart = async () => {
     if (!user || !activeWorkspaceId || !activeDestinationId) return;
-    console.log('🎤 handleRecordingStart triggered in App.jsx for user:', user.name);
 
     const recordingPayload = {
       workspaceId: activeWorkspaceId,
@@ -1651,7 +1642,6 @@ function SlackDashboard({ user, logout }) {
   // Stop voice recording status helper
   const handleRecordingStop = async () => {
     if (!user) return;
-    console.log('🛑 handleRecordingStop triggered in App.jsx for user:', user.name);
 
     if (isConfigured) {
       try {
@@ -1769,7 +1759,6 @@ function SlackDashboard({ user, logout }) {
             messageId: msgDocRef.id,
             createdAt: serverTimestamp()
           };
-          console.log('✉️ Creating DM notification in Firestore for recipient:', destId, notificationData);
           await addDoc(collection(db, 'notifications'), notificationData);
         } else {
           // Channel Message or Thread Reply
@@ -1810,12 +1799,10 @@ function SlackDashboard({ user, logout }) {
                 messageId: msgDocRef.id,
                 createdAt: serverTimestamp()
               };
-              console.log('✉️ Creating Thread Reply notification in Firestore for:', targetUid, notificationData);
               await addDoc(collection(db, 'notifications'), notificationData);
             }
           } else {
             // Standard Channel Message: notify all workspace members except sender
-            console.log('✉️ Message sent. Evaluating workspace members to notify:', membersList);
             for (const memberUid of membersList) {
               if (memberUid !== user.uid) {
                 const memberUser = allRegisteredUsers.find(u => u.uid === memberUid);
@@ -1837,7 +1824,6 @@ function SlackDashboard({ user, logout }) {
                   messageId: msgDocRef.id,
                   createdAt: serverTimestamp()
                 };
-                console.log('✉️ Creating Channel Message notification in Firestore for:', memberUid, notificationData);
                 await addDoc(collection(db, 'notifications'), notificationData);
               }
             }

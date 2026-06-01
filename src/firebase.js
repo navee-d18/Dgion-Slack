@@ -30,7 +30,6 @@ if (isConfigured) {
     auth = getAuth(app);
     db = getFirestore(app);
     storage = getStorage(app);
-    console.log('⚡ Firebase Cloud Authentication successfully initialized.');
   } catch (error) {
     console.error('❌ Failed to initialize Firebase SDK:', error);
   }
