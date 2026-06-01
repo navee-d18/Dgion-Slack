@@ -378,6 +378,7 @@ const FullEmojiPicker = ({ onSelectEmoji, onClose }) => {
 };
 
 import { emojiCategories, searchEmojis } from '../utils/emojiData';
+import { getReceiptMillis, dmSeenState, isScheduleTimeInvalid } from '../utils/datetime';
 
 const VoiceNotePlayer = ({ file, messageId, setActiveAudioId }) => {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -679,13 +680,10 @@ export default function ChatArea({
   }, [showSchedulerPopover]);
 
   // Compute live validation state of custom input
-  const isScheduleInvalid = React.useMemo(() => {
-    if (!customDate || !customTime) return false;
-    const [year, month, day] = customDate.split('-').map(Number);
-    const [hour, min] = customTime.split(':').map(Number);
-    const target = new Date(year, month - 1, day, hour, min, 0, 0);
-    return isNaN(target.getTime()) || target.getTime() <= Date.now();
-  }, [customDate, customTime]);
+  const isScheduleInvalid = React.useMemo(
+    () => isScheduleTimeInvalid(customDate, customTime, Date.now()),
+    [customDate, customTime]
+  );
 
   // Voice note / audio recording refs
   const mediaRecorderRef = useRef(null);
@@ -886,15 +884,6 @@ export default function ChatArea({
   };
 
   // ── Read receipts ───────────────────────────────────────────────
-  const getReceiptMillis = (ts) => {
-    if (!ts) return 0;
-    if (typeof ts === 'number') return ts;
-    if (typeof ts.toMillis === 'function') return ts.toMillis();
-    if (typeof ts.seconds === 'number') return ts.seconds * 1000;
-    const d = new Date(ts);
-    return isNaN(d.getTime()) ? 0 : d.getTime();
-  };
-
   const formatSeenTime = (ts) => {
     const ms = getReceiptMillis(ts);
     if (!ms) return '';
@@ -911,19 +900,21 @@ export default function ChatArea({
 
     if (isDestinationDm) {
       const recipientReceipt = readReceipts.find(r => r.userId === activeDestinationId);
-      const seenMs = recipientReceipt ? getReceiptMillis(recipientReceipt.lastReadAt) : 0;
-      if (seenMs && seenMs >= msgMs) {
+      const recipientMember = activeWorkspace?.allWorkspaceMembers?.find(m => m.id === activeDestinationId);
+      const state = dmSeenState({
+        msgMs,
+        recipientReadMs: recipientReceipt ? getReceiptMillis(recipientReceipt.lastReadAt) : 0,
+        recipientOnline: !!(recipientMember && recipientMember.status === 'online'),
+        recipientPresenceMs: recipientMember ? getReceiptMillis(recipientMember.lastSeenAt) : 0,
+      });
+      if (state === 'seen') {
         return (
           <span className="flex items-center gap-1 text-[11px] text-[#1164A3] font-bold mt-0.5 select-none">
             <CheckCheck className="w-3.5 h-3.5 shrink-0" /> Seen {formatSeenTime(recipientReceipt.lastReadAt)}
           </span>
         );
       }
-      // Delivered: recipient online now, or online after the message was sent.
-      const recipientMember = activeWorkspace?.allWorkspaceMembers?.find(m => m.id === activeDestinationId);
-      const isOnline = recipientMember && recipientMember.status === 'online';
-      const presenceMs = recipientMember ? getReceiptMillis(recipientMember.lastSeenAt) : 0;
-      if (isOnline || (presenceMs && presenceMs >= msgMs)) {
+      if (state === 'delivered') {
         return (
           <span className="flex items-center gap-1 text-[11px] text-slate-400 font-semibold mt-0.5 select-none">
             <CheckCheck className="w-3.5 h-3.5 shrink-0" /> Delivered

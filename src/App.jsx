@@ -37,6 +37,7 @@ import {
 import { db, isConfigured } from './firebase';
 import { purgeAllDemoData } from './utils/dbCleanup';
 import { uploadAttachment } from './utils/storage';
+import { dmConversationId, conversationKey } from './utils/conversation';
 
 // Rich fallback database (when running in Local Developer Emulation Mode)
 const INITIAL_WORKSPACES = [];
@@ -540,7 +541,7 @@ function SlackDashboard({ user, logout }) {
     let q;
     if (isDestinationDm) {
       // Direct message query: watch the shared conversation ID (latest page only)
-      const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
+      const sharedConversationId = dmConversationId(user.uid, activeDestinationId);
       q = query(
         collection(db, 'messages'),
         where('workspaceId', '==', activeWorkspaceId),
@@ -613,7 +614,7 @@ function SlackDashboard({ user, logout }) {
 
     let q;
     if (isDestinationDm) {
-      const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
+      const sharedConversationId = dmConversationId(user.uid, activeDestinationId);
       q = query(
         collection(db, 'messages'),
         where('workspaceId', '==', activeWorkspaceId),
@@ -648,7 +649,7 @@ function SlackDashboard({ user, logout }) {
   // conversationKey groups a conversation symmetrically: a DM uses the sorted uid
   // pair (identical for both participants); a channel uses the channelId.
   const activeConversationKey = (activeWorkspaceId && activeDestinationId && user)
-    ? (isDestinationDm ? [user.uid, activeDestinationId].sort().join('_') : activeDestinationId)
+    ? conversationKey({ selfUid: user.uid, destinationId: activeDestinationId, isDm: isDestinationDm })
     : '';
 
   // 1. Firestore observer for the active conversation's receipts
@@ -1015,7 +1016,7 @@ function SlackDashboard({ user, logout }) {
     const loadLocalMessages = () => {
       const allMessages = JSON.parse(localStorage.getItem('slack_messages') || '[]');
       const channelKey = `${activeWorkspaceId}-${activeDestinationId}`;
-      const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
+      const sharedConversationId = dmConversationId(user.uid, activeDestinationId);
       
       const filtered = allMessages.filter(m => {
         if (m.workspaceId !== activeWorkspaceId) return false;
@@ -1723,7 +1724,7 @@ function SlackDashboard({ user, logout }) {
         }
 
         if (destIsDm) {
-          const sharedConversationId = [user.uid, destId].sort().join('_');
+          const sharedConversationId = dmConversationId(user.uid, destId);
           messageData.conversationId = sharedConversationId;
           messageData.receiverId = destId;
           messageData.channelId = destId;
@@ -1853,7 +1854,7 @@ function SlackDashboard({ user, logout }) {
       }
 
       if (destIsDm) {
-        const sharedConversationId = [user.uid, destId].sort().join('_');
+        const sharedConversationId = dmConversationId(user.uid, destId);
         newMessage.conversationId = sharedConversationId;
         newMessage.receiverId = destId;
         newMessage.channelId = destId;
@@ -2066,7 +2067,7 @@ function SlackDashboard({ user, logout }) {
         };
 
         if (isDestinationDm) {
-          const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
+          const sharedConversationId = dmConversationId(user.uid, activeDestinationId);
           messageData.conversationId = sharedConversationId;
           messageData.receiverId = activeDestinationId;
           messageData.channelId = activeDestinationId;
@@ -2105,7 +2106,7 @@ function SlackDashboard({ user, logout }) {
         };
 
         if (isDestinationDm) {
-          const sharedConversationId = [user.uid, activeDestinationId].sort().join('_');
+          const sharedConversationId = dmConversationId(user.uid, activeDestinationId);
           localMsg.conversationId = sharedConversationId;
           localMsg.receiverId = activeDestinationId;
           localMsg.channelId = activeDestinationId;
