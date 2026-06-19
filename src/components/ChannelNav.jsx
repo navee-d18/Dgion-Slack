@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Hash, Lock, Plus, Settings, Bell, HelpCircle, LogOut } from 'lucide-react';
+import { ChevronDown, ChevronRight, Hash, Lock, Plus, Settings, Shield, Bell, HelpCircle, LogOut } from 'lucide-react';
 
 export default function ChannelNav({
   activeWorkspace,
@@ -10,8 +10,10 @@ export default function ChannelNav({
   onInviteClick,
   onCloseMobileDrawer,
   currentUser,
+  isAdmin = false,
   onLogout,
   onSettingsClick,
+  onAdminClick,
   onPreferencesClick,
   onHelpClick,
   compactMode,
@@ -24,6 +26,8 @@ export default function ChannelNav({
   if (!activeWorkspace) return null;
 
   const isCreator = activeWorkspace.createdBy === currentUser?.uid;
+  // Owner OR a promoted workspace admin can manage channels, invites & the panel.
+  const canManage = isCreator || isAdmin;
 
   const handleSelect = (destId, isDm) => {
     onSelectDestination(destId, isDm);
@@ -94,7 +98,7 @@ export default function ChannelNav({
                 )}
               </div>
               <div className="space-y-0.5">
-                {isCreator && (
+                {canManage && (
                   <button
                     onClick={() => {
                       setMenuOpen(false);
@@ -107,7 +111,20 @@ export default function ChannelNav({
                   </button>
                 )}
 
-                {isCreator && <div className="h-[1px] bg-[#E8E8E8] my-1" />}
+                {canManage && <div className="h-[1px] bg-[#E8E8E8] my-1" />}
+
+                {canManage && onAdminClick && (
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onAdminClick();
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-xs font-bold hover:bg-[#F1E7F2] flex items-center gap-2 rounded text-[#3F0E40] transition-colors cursor-pointer"
+                  >
+                    <Shield className="w-3.5 h-3.5 text-[#3F0E40]" />
+                    Admin Panel
+                  </button>
+                )}
 
                 {isCreator && (
                   <button
@@ -180,7 +197,7 @@ export default function ChannelNav({
               )}
               <span>Channels</span>
             </button>
-            {isCreator && (
+            {canManage && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -231,7 +248,7 @@ export default function ChannelNav({
                 );
               })}
               
-              {isCreator && (
+              {canManage && (
                 <button
                   onClick={onAddChannelClick}
                   className={`w-full flex items-center gap-2.5 px-3.5 rounded-md text-left hover:bg-white/5 text-white/40 hover:text-white/80 transition-colors font-semibold mt-0.5 ${

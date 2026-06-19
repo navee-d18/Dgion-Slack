@@ -5,6 +5,7 @@ import ChatArea from './components/ChatArea';
 import MembersPanel from './components/MembersPanel';
 import ThreadPanel from './components/ThreadPanel';
 import PinnedPanel from './components/PinnedPanel';
+import AdminPanel from './components/AdminPanel';
 import { 
   CreateChannelModal, CreateWorkspaceModal, SearchModal, InviteWorkspaceModal, 
   EditDeleteChannelModal, JoinWorkspaceModal, WorkspaceSettingsModal, 
@@ -31,6 +32,7 @@ import {
   updateDoc,
   setDoc,
   arrayUnion,
+  arrayRemove,
   deleteDoc,
   runTransaction
 } from 'firebase/firestore';
@@ -2422,10 +2424,13 @@ function SlackDashboard({ user, logout }) {
   const handleDeleteChannel = async (channelId) => {
     if (!activeWorkspaceId || !user) return;
 
+    const channelToDelete = workspaces.find(ws => ws.id === activeWorkspaceId)?.channels?.find(c => c.id === channelId);
+
     if (isConfigured) {
       try {
         await deleteDoc(doc(db, 'channels', channelId));
-        
+        logAdminAction('channel_deleted', { targetName: channelToDelete?.name || channelId, text: 'Deleted a channel' });
+
         // Automatically fallback to active workspace's default '#general' channel
         const activeWorkspaceRaw = workspaces.find(ws => ws.id === activeWorkspaceId);
         const generalChan = activeWorkspaceRaw?.channels?.find(c => c.name === 'general');
@@ -2540,6 +2545,7 @@ function SlackDashboard({ user, logout }) {
           name: newName,
           iconText: newIconText
         });
+        logAdminAction('workspace_updated', { targetName: newName, text: 'Updated workspace settings' });
       } catch (err) {
         console.error('Error updating workspace:', err);
         throw err;
@@ -2807,9 +2813,13 @@ function SlackDashboard({ user, logout }) {
         if (wsSnap.exists()) {
           const currentMembers = wsSnap.data().members || [];
           const updatedMembers = currentMembers.filter(uid => uid !== memberId);
+          const removedMember = activeWorkspace.allWorkspaceMembers?.find(m => m.id === memberId);
           await updateDoc(wsRef, {
-            members: updatedMembers
+            members: updatedMembers,
+            // A removed member also forfeits any admin rights.
+            admins: arrayRemove(memberId)
           });
+          logAdminAction('member_removed', { targetName: removedMember?.name || memberId, text: 'Removed from workspace' });
         }
       } catch (err) {
         console.error('Error removing member:', err);
@@ -2829,6 +2839,104 @@ function SlackDashboard({ user, logout }) {
         }
         return ws;
       }));
+    }
+  };
+
+  // ========================================================
+  // ADMIN: audit trail, role management & message moderation
+  // ========================================================
+
+  // Append an entry to the workspace's audit_logs trail. Best-effort: a logging
+  // failure must never block the underlying admin action, so errors are swallowed.
+  const logAdminAction = async (action, { targetName = '', text = '' } = {}) => {
+    if (!isConfigured || !user || !activeWorkspaceId) return;
+    try {
+      await addDoc(collection(db, 'audit_logs'), {
+        workspaceId: activeWorkspaceId,
+        action,
+        actorId: user.uid,
+        actorName: user.name || user.email || 'Admin',
+        targetName,
+        detail: text,
+        createdAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.error('Error writing audit log:', err);
+    }
+  };
+
+  // Grant a member workspace-admin rights (added to the workspace `admins` array).
+  const handlePromoteAdmin = async (memberId) => {
+    if (!activeWorkspaceId || !user || !activeWorkspace) return;
+    if (memberId === activeWorkspace.createdBy) return; // owner is implicitly admin
+    const target = activeWorkspace.allWorkspaceMembers?.find(m => m.id === memberId);
+
+    if (isConfigured) {
+      try {
+        await updateDoc(doc(db, 'workspaces', activeWorkspaceId), { admins: arrayUnion(memberId) });
+        logAdminAction('admin_promoted', { targetName: target?.name || memberId, text: 'Promoted to admin' });
+      } catch (err) {
+        console.error('Error promoting admin:', err);
+        throw err;
+      }
+    } else {
+      setWorkspaces(prev => prev.map(ws => ws.id === activeWorkspaceId
+        ? { ...ws, admins: [...(ws.admins || []), memberId] }
+        : ws));
+    }
+  };
+
+  // Revoke a member's workspace-admin rights.
+  const handleDemoteAdmin = async (memberId) => {
+    if (!activeWorkspaceId || !user || !activeWorkspace) return;
+    if (memberId === activeWorkspace.createdBy) {
+      throw new Error("The workspace owner's admin rights cannot be revoked.");
+    }
+    const target = activeWorkspace.allWorkspaceMembers?.find(m => m.id === memberId);
+
+    if (isConfigured) {
+      try {
+        await updateDoc(doc(db, 'workspaces', activeWorkspaceId), { admins: arrayRemove(memberId) });
+        logAdminAction('admin_demoted', { targetName: target?.name || memberId, text: 'Revoked admin rights' });
+      } catch (err) {
+        console.error('Error demoting admin:', err);
+        throw err;
+      }
+    } else {
+      setWorkspaces(prev => prev.map(ws => ws.id === activeWorkspaceId
+        ? { ...ws, admins: (ws.admins || []).filter(id => id !== memberId) }
+        : ws));
+    }
+  };
+
+  // Admin moderation: soft-delete ANY channel message by id (works regardless of
+  // which conversation is currently open). Reuses the same "deleted by admin"
+  // shape that ChatArea already renders.
+  const handleModerateMessage = async (messageId, meta = {}) => {
+    if (!isConfigured || !user) return;
+    try {
+      const ref = doc(db, 'messages', messageId);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return;
+      await updateDoc(ref, {
+        deletedForEveryone: true,
+        deletedByAdmin: true,
+        reactions: {},
+        file: null,
+        voiceRecording: null
+      });
+      // Clean up any unread notifications pointing at this message.
+      try {
+        const notifSnap = await getDocs(query(collection(db, 'notifications'), where('messageId', '==', messageId)));
+        notifSnap.forEach((nDoc) => deleteDoc(nDoc.ref));
+      } catch (e) {}
+      logAdminAction('message_deleted', {
+        targetName: meta.senderName || '',
+        text: meta.channelName ? `Removed a message in #${meta.channelName}` : 'Removed a message'
+      });
+    } catch (err) {
+      console.error('Error moderating message:', err);
+      throw err;
     }
   };
 
@@ -2899,6 +3007,11 @@ function SlackDashboard({ user, logout }) {
     allWorkspaceMembers: formattedDms
   } : null;
 
+  // Workspace-admin = the creator/owner OR any UID in the workspace `admins` array.
+  // This gates the Admin Panel, channel/invite controls and moderation tools.
+  const isCurrentUserOwner = !!activeWorkspace && activeWorkspace.createdBy === user?.uid;
+  const isCurrentUserAdmin = isCurrentUserOwner || (activeWorkspace?.admins || []).includes(user?.uid);
+
 
   if (workspacesLoading) {
     return (
@@ -2947,8 +3060,10 @@ function SlackDashboard({ user, logout }) {
           onAddChannelClick={() => setActiveModal('create_channel')}
           onInviteClick={() => setActiveModal('invite_people')}
           currentUser={user}
+          isAdmin={isCurrentUserAdmin}
           onLogout={logout}
           onSettingsClick={() => setActiveModal('workspace_settings')}
+          onAdminClick={() => setActiveModal('admin')}
           onPreferencesClick={() => setActiveModal('preferences')}
           onHelpClick={() => setActiveModal('help_feedback')}
           compactMode={compactMode}
@@ -2997,9 +3112,14 @@ function SlackDashboard({ user, logout }) {
               }}
               onCloseMobileDrawer={() => setMobileSidebarOpen(false)}
               currentUser={user}
+              isAdmin={isCurrentUserAdmin}
               onLogout={logout}
               onSettingsClick={() => {
                 setActiveModal('workspace_settings');
+                setMobileSidebarOpen(false);
+              }}
+              onAdminClick={() => {
+                setActiveModal('admin');
                 setMobileSidebarOpen(false);
               }}
               onPreferencesClick={() => {
@@ -3164,7 +3284,7 @@ function SlackDashboard({ user, logout }) {
       />
 
       <InviteWorkspaceModal
-        isOpen={activeModal === 'invite_people' && activeWorkspace?.createdBy === user?.uid}
+        isOpen={activeModal === 'invite_people' && isCurrentUserAdmin}
         onClose={() => setActiveModal(null)}
         onInvite={handleInviteUser}
         activeWorkspace={activeWorkspace}
@@ -3185,6 +3305,24 @@ function SlackDashboard({ user, logout }) {
         currentUser={user}
         onUpdate={handleUpdateWorkspace}
         onDelete={handleDeleteWorkspace}
+      />
+
+      <AdminPanel
+        isOpen={activeModal === 'admin' && isCurrentUserAdmin}
+        onClose={() => setActiveModal(null)}
+        workspace={activeWorkspace}
+        currentUser={user}
+        isOwner={isCurrentUserOwner}
+        onUpdateWorkspace={handleUpdateWorkspace}
+        onDeleteWorkspace={handleDeleteWorkspace}
+        onDeleteChannel={handleDeleteChannel}
+        onRemoveMember={handleRemoveMember}
+        onPromoteAdmin={handlePromoteAdmin}
+        onDemoteAdmin={handleDemoteAdmin}
+        onModerateMessage={handleModerateMessage}
+        onAddChannelClick={() => setActiveModal('create_channel')}
+        onInviteClick={() => setActiveModal('invite_people')}
+        onOpenProfile={handleOpenProfile}
       />
 
       <PreferencesModal

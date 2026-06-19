@@ -15,8 +15,20 @@ service cloud.firestore {
 
     // Helper: Check if user is the workspace creator
     function isWorkspaceCreator(workspaceId) {
-      return isSignedIn() && 
+      return isSignedIn() &&
         get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.createdBy == request.auth.uid;
+    }
+
+    // Helper: Check if user is a workspace admin — the creator/owner OR a UID
+    // listed in the workspace's optional `admins` array. Admins get the elevated
+    // management rights the creator has (manage channels/members/messages),
+    // EXCEPT transferring ownership or deleting the workspace (creator-only).
+    function isWorkspaceAdmin(workspaceId) {
+      let ws = get(/databases/$(database)/documents/workspaces/$(workspaceId)).data;
+      return isSignedIn() && (
+        ws.createdBy == request.auth.uid
+        || (ws.keys().hasAny(['admins']) && request.auth.uid in ws.admins)
+      );
     }
 
     // 1. Users Collection Rules
@@ -42,15 +54,21 @@ service cloud.firestore {
           && request.auth.uid in request.resource.data.members
           && request.resource.data.members.size() == resource.data.members.size() + 1
         )
+        // Option C: a workspace admin may manage members/admins/name/icon, but can
+        // NOT seize ownership (createdBy is locked to its current value).
+        || (
+          isWorkspaceAdmin(workspaceId)
+          && request.resource.data.createdBy == resource.data.createdBy
+        )
       );
       allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
     }
 
     // 3. Channels Collection Rules
     match /channels/{channelId} {
-      allow create: if isSignedIn() && isWorkspaceCreator(request.resource.data.workspaceId);
+      allow create: if isSignedIn() && isWorkspaceAdmin(request.resource.data.workspaceId);
       allow read: if isSignedIn() && isMemberOfWorkspace(resource.data.workspaceId);
-      allow update, delete: if isSignedIn() && isWorkspaceCreator(resource.data.workspaceId);
+      allow update, delete: if isSignedIn() && isWorkspaceAdmin(resource.data.workspaceId);
     }
 
     // 4. Messages Collection Rules
@@ -74,8 +92,8 @@ service cloud.firestore {
       allow update: if isSignedIn() && (
         // Sender of the message can edit/delete their own message
         (resource.data.senderId == request.auth.uid && isMemberOfWorkspace(resource.data.workspaceId))
-        // Or the workspace creator can edit/delete any message inside the workspace
-        || isWorkspaceCreator(resource.data.workspaceId)
+        // Or any workspace admin can edit/moderate any message inside the workspace
+        || isWorkspaceAdmin(resource.data.workspaceId)
         // OR any workspace member can update ONLY the deletedFor field (for "Delete for me")
         || (
           isMemberOfWorkspace(resource.data.workspaceId)
@@ -84,7 +102,7 @@ service cloud.firestore {
       );
       allow delete: if isSignedIn() && (
         (resource.data.senderId == request.auth.uid && isMemberOfWorkspace(resource.data.workspaceId))
-        || isWorkspaceCreator(resource.data.workspaceId)
+        || isWorkspaceAdmin(resource.data.workspaceId)
       );
     }
 
@@ -136,6 +154,16 @@ service cloud.firestore {
         && resource.data.userId == request.auth.uid
         && request.resource.data.userId == request.auth.uid;
       allow delete: if false;
+    }
+
+    // 11. Audit Logs Rules — an append-only trail of admin actions. Only workspace
+    // admins may read or append; entries can never be edited or removed.
+    match /audit_logs/{logId} {
+      allow read: if isSignedIn() && isWorkspaceAdmin(resource.data.workspaceId);
+      allow create: if isSignedIn()
+        && isWorkspaceAdmin(request.resource.data.workspaceId)
+        && request.resource.data.actorId == request.auth.uid;
+      allow update, delete: if false;
     }
   }
 }
